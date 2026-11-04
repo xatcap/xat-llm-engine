@@ -1,0 +1,189 @@
+using System.Net.Http.Json;
+using System.Net.ServerSentEvents;
+using System.Runtime.CompilerServices;
+using System.Text.Json;
+using Polly.Timeout;
+using XatLlmEngine.Application.Abstractions;
+using XatLlmEngine.Domain;
+
+namespace XatLlmEngine.Infrastructure.Providers.Anthropic;
+
+/// <summary>Serves chat requests through the Anthropic Messages API.</summary>
+/// <remarks>The differences from the OpenAI protocol stay inside this adapter, so use cases do not know about them.</remarks>
+/// <param name="name">The provider's name.</param>
+/// <param name="options">The provider's settings. Its base URL and key must be set.</param>
+/// <param name="httpClientFactory">Creates HTTP clients, so that connections are pooled properly.</param>
+/// <param name="httpClientName">The named client, which carries the provider's resilience settings.</param>
+internal sealed class AnthropicChatProvider(
+    string name,
+    ProviderOptions options,
+    IHttpClientFactory httpClientFactory,
+    string httpClientName) : IChatProvider
+{
+    /// <summary>The API version this adapter was written against.</summary>
+    private const string ApiVersion = "2023-06-01";
+
+    /// <inheritdoc/>
+    public string Name => name;
+
+    /// <inheritdoc/>
+    public IReadOnlyList<string> Models => options.Models;
+
+    /// <inheritdoc/>
+    public async Task<Result<ChatCompletion>> CompleteAsync(ChatRequest request, CancellationToken cancellationToken)
+    {
+        try
+        {
+            using var response = await SendAsync(ToWire(request, stream: false), cancellationToken).ConfigureAwait(false);
+            if (!response.IsSuccessStatusCode)
+            {
+                return Result<ChatCompletion>.Fail(await HttpFailure.FromResponseAsync(name, response, cancellationToken).ConfigureAwait(false));
+            }
+
+            var body = await response.Content
+                .ReadFromJsonAsync(ProviderJson.Default.AnthropicResponse, cancellationToken)
+                .ConfigureAwait(false);
+            if (body?.Content is null)
+            {
+                return Result<ChatCompletion>.Fail(HttpFailure.Malformed(name));
+            }
+
+            var text = string.Concat(body.Content.Where(block => block.Type == "text").Select(block => block.Text));
+            var usage = body.Usage is null ? null : new TokenUsage(body.Usage.InputTokens ?? 0, body.Usage.OutputTokens ?? 0);
+            return Result<ChatCompletion>.Ok(new ChatCompletion(text, ToFinishReason(body.StopReason), usage));
+        }
+        catch (JsonException)
+        {
+            return Result<ChatCompletion>.Fail(HttpFailure.Malformed(name));
+        }
+        catch (Exception exception) when (exception is HttpRequestException or TimeoutRejectedException)
+        {
+            return Result<ChatCompletion>.Fail(HttpFailure.Unreachable(name));
+        }
+    }
+
+    /// <inheritdoc/>
+    public async Task<Result<IAsyncEnumerable<ChatChunk>>> StreamAsync(ChatRequest request, CancellationToken cancellationToken)
+    {
+        HttpResponseMessage response;
+        try
+        {
+            response = await SendAsync(ToWire(request, stream: true), cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is HttpRequestException or TimeoutRejectedException)
+        {
+            return Result<IAsyncEnumerable<ChatChunk>>.Fail(HttpFailure.Unreachable(name));
+        }
+
+        if (!response.IsSuccessStatusCode)
+        {
+            using (response)
+            {
+                return Result<IAsyncEnumerable<ChatChunk>>.Fail(await HttpFailure.FromResponseAsync(name, response, cancellationToken).ConfigureAwait(false));
+            }
+        }
+
+        return Result<IAsyncEnumerable<ChatChunk>>.Ok(ReadChunksAsync(response, cancellationToken));
+    }
+
+    /// <summary>Converts Anthropic's stop reason to the engine's reason.</summary>
+    /// <param name="stopReason">The wire value.</param>
+    /// <returns>The engine's reason. Natural endings and stop sequences both count as a normal stop.</returns>
+    private static FinishReason ToFinishReason(string? stopReason) => stopReason switch
+    {
+        "max_tokens" => FinishReason.Length,
+        "refusal" => FinishReason.ContentFilter,
+        _ => FinishReason.Stop,
+    };
+
+    /// <summary>Sends the request and returns as soon as response headers arrive, so that streams are not buffered.</summary>
+    /// <param name="body">The request body.</param>
+    /// <param name="cancellationToken">Cancels the request.</param>
+    /// <returns>The response, which the caller must dispose.</returns>
+    private async Task<HttpResponseMessage> SendAsync(AnthropicRequest body, CancellationToken cancellationToken)
+    {
+        using var message = new HttpRequestMessage(HttpMethod.Post, new Uri($"{options.BaseUrl!.ToString().TrimEnd('/')}/v1/messages"))
+        {
+            Content = JsonContent.Create(body, ProviderJson.Default.AnthropicRequest),
+        };
+        message.Headers.Add("x-api-key", options.ApiKey);
+        message.Headers.Add("anthropic-version", ApiVersion);
+
+        using var client = httpClientFactory.CreateClient(httpClientName);
+        return await client.SendAsync(message, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>Builds the request body. System messages move to the top-level field, because the API has no system role.</summary>
+    /// <param name="request">The validated request.</param>
+    /// <param name="stream">Whether to ask for a stream.</param>
+    /// <returns>The request body.</returns>
+    private AnthropicRequest ToWire(ChatRequest request, bool stream)
+    {
+        var system = string.Join("\n\n", request.Messages.Where(message => message.Role == ChatRole.System).Select(message => message.Content));
+        var messages = request.Messages
+            .Where(message => message.Role != ChatRole.System)
+            .Select(message => new AnthropicMessage(message.Role == ChatRole.Assistant ? "assistant" : "user", message.Content))
+            .ToList();
+
+        return new AnthropicRequest(
+            request.Model,
+            request.MaxTokens ?? options.DefaultMaxTokens,
+            messages,
+            system.Length > 0 ? system : null,
+            request.Temperature,
+            request.TopP,
+            request.Stop.Count > 0 ? request.Stop : null,
+            stream ? true : null);
+    }
+
+    /// <summary>Converts stream events into chunks and releases the connection at the end.</summary>
+    /// <param name="response">The successful response, which this method takes ownership of.</param>
+    /// <param name="cancellationToken">Cancels reading.</param>
+    /// <returns>The chunks that carry something useful.</returns>
+    private async IAsyncEnumerable<ChatChunk> ReadChunksAsync(HttpResponseMessage response, [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        var inputTokens = 0;
+        await foreach (var item in SseReader.ReadAsync(name, response, cancellationToken).ConfigureAwait(false))
+        {
+            var streamEvent = Parse(item);
+            switch (streamEvent?.Type)
+            {
+                case "message_start":
+                    inputTokens = streamEvent.Message?.Usage?.InputTokens ?? 0;
+                    break;
+                case "content_block_delta" when streamEvent.Delta is { Type: "text_delta", Text.Length: > 0 }:
+                    yield return new ChatChunk(streamEvent.Delta.Text, null, null);
+                    break;
+                case "message_delta":
+                    yield return new ChatChunk(
+                        null,
+                        ToFinishReason(streamEvent.Delta?.StopReason),
+                        new TokenUsage(streamEvent.Usage?.InputTokens ?? inputTokens, streamEvent.Usage?.OutputTokens ?? 0));
+                    break;
+                case "message_stop":
+                    yield break;
+            }
+        }
+    }
+
+    /// <summary>Parses one stream event.</summary>
+    /// <param name="item">The raw event.</param>
+    /// <returns>The parsed event.</returns>
+    /// <exception cref="ChatStreamException">The event reports an error or cannot be read.</exception>
+    private AnthropicEvent? Parse(SseItem<string> item)
+    {
+        if (item.EventType == "error")
+        {
+            throw new ChatStreamException(new EngineError(ErrorKind.Upstream, $"The provider '{name}' failed while streaming."));
+        }
+
+        try
+        {
+            return JsonSerializer.Deserialize(item.Data, ProviderJson.Default.AnthropicEvent);
+        }
+        catch (JsonException exception)
+        {
+            throw new ChatStreamException(HttpFailure.Malformed(name), exception);
+        }
+    }
+}

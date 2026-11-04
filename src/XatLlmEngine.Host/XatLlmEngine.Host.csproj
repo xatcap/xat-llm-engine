@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <PropertyGroup>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\XatLlmEngine.Application\XatLlmEngine.Application.csproj" />
+    <ProjectReference Include="..\XatLlmEngine.Infrastructure\XatLlmEngine.Infrastructure.csproj" />
+    <PackageReference Include="Microsoft.AspNetCore.OpenApi" />
+    <PackageReference Include="Swashbuckle.AspNetCore.SwaggerUI" />
+  </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="XatLlmEngine.Host.Tests" />
+  </ItemGroup>
+</Project>

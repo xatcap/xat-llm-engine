@@ -1,0 +1,59 @@
+using System.Text.Json.Nodes;
+using Microsoft.AspNetCore.OpenApi;
+using Microsoft.OpenApi;
+
+namespace XatLlmEngine.Host.Endpoints;
+
+/// <summary>Completes the generated API document: its title, the bearer key behind Swagger UI's Authorize button, and a working chat example.</summary>
+internal sealed class ApiDocumentTransformer : IOpenApiDocumentTransformer
+{
+    /// <summary>The name of the security scheme inside the document.</summary>
+    private const string SchemeName = "Bearer";
+
+    /// <summary>Describes the chat request body. The example is what Swagger UI fills in for "Try it out", so it must be a request the API accepts.</summary>
+    /// <param name="document">The generated document.</param>
+    private static void DescribeChatRequest(OpenApiDocument document)
+    {
+        var body = document.Paths["/v1/chat/completions"].Operations?[HttpMethod.Post].RequestBody as OpenApiRequestBody;
+        if (body is null)
+        {
+            return;
+        }
+
+        body.Description = "The chat request. Only 'model' and 'messages' are required.";
+        if (body.Content?["application/json"] is OpenApiMediaType media)
+        {
+            media.Example = JsonNode.Parse("""{"model":"local/ministral-3-3b","messages":[{"role":"user","content":"Hello"}]}""");
+        }
+    }
+
+    /// <inheritdoc/>
+    public Task TransformAsync(OpenApiDocument document, OpenApiDocumentTransformerContext context, CancellationToken cancellationToken)
+    {
+        document.Info.Title = "xat-llm-engine";
+        document.Components ??= new OpenApiComponents();
+        document.Components.SecuritySchemes ??= new Dictionary<string, IOpenApiSecurityScheme>();
+        document.Components.SecuritySchemes[SchemeName] = new OpenApiSecurityScheme
+        {
+            Type = SecuritySchemeType.Http,
+            Scheme = "bearer",
+            Description = "A key from Engine:ApiKeys. It is not needed when no keys are configured.",
+        };
+
+        var requirement = new OpenApiSecurityRequirement { [new OpenApiSecuritySchemeReference(SchemeName, document)] = [] };
+        foreach (var (path, item) in document.Paths)
+        {
+            // Only the /v1 routes need a key.
+            if (path.StartsWith("/v1/", StringComparison.Ordinal) && item.Operations is { } operations)
+            {
+                foreach (var operation in operations.Values)
+                {
+                    operation.Security = [requirement];
+                }
+            }
+        }
+
+        DescribeChatRequest(document);
+        return Task.CompletedTask;
+    }
+}

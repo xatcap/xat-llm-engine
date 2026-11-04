@@ -1,0 +1,16 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/XatLlmEngine.Application/XatLlmEngine.Application.csproj" />
+    <Project Path="src/XatLlmEngine.Domain/XatLlmEngine.Domain.csproj" />
+    <Project Path="src/XatLlmEngine.Host/XatLlmEngine.Host.csproj" />
+    <Project Path="src/XatLlmEngine.Infrastructure/XatLlmEngine.Infrastructure.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/XatLlmEngine.Application.Tests/XatLlmEngine.Application.Tests.csproj" />
+    <Project Path="tests/XatLlmEngine.Architecture.Tests/XatLlmEngine.Architecture.Tests.csproj" />
+    <Project Path="tests/XatLlmEngine.Domain.Tests/XatLlmEngine.Domain.Tests.csproj" />
+    <Project Path="tests/XatLlmEngine.FakeLlamaServer/XatLlmEngine.FakeLlamaServer.csproj" />
+    <Project Path="tests/XatLlmEngine.Host.Tests/XatLlmEngine.Host.Tests.csproj" />
+    <Project Path="tests/XatLlmEngine.Infrastructure.Tests/XatLlmEngine.Infrastructure.Tests.csproj" />
+  </Folder>
+</Solution>
