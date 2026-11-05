@@ -1,0 +1,18 @@
+# Build output
+bin/
+obj/
+artifacts/
+TestResults/
+*.user
+.vs/
+.idea/
+
+# Models and native binaries are release assets, never source files
+*.gguf
+models/*
+!models/README.txt
+/llama/
+
+# Secrets and machine files
+appsettings.*.local.json
+.DS_Store
