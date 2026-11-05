@@ -52,15 +52,6 @@ internal static class ErrorMapping
         return Results.Json(ToBody(error), HostJson.Default.ErrorResponse, statusCode: ToStatusCode(error.Kind));
     }
 
-    /// <summary>Builds the result for a missing or wrong API key.</summary>
-    /// <param name="context">The current request.</param>
-    /// <returns>A 401 result.</returns>
-    public static IResult Unauthorized(HttpContext context)
-    {
-        context.Response.Headers.WWWAuthenticate = "Bearer";
-        return Json("A valid API key is required in the Authorization header.", "authentication_error", StatusCodes.Status401Unauthorized);
-    }
-
     /// <summary>Builds the result for a request that is not JSON.</summary>
     /// <returns>A 415 result.</returns>
     public static IResult UnsupportedMediaType() =>

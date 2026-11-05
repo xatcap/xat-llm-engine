@@ -1,5 +1,4 @@
 using System.Net;
-using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
 using XatLlmEngine.Application.Abstractions;
@@ -333,66 +332,6 @@ public class ApiTests
         Assert.Contains("fake/model-a", ids);
     }
 
-    /// <summary>When the configuration has keys, every API route refuses requests without a correct key.</summary>
-    /// <param name="header">The Authorization header to send, if any.</param>
-    /// <returns>A task for the test.</returns>
-    [Theory]
-    [InlineData(null)]
-    [InlineData("Bearer wrong")]
-    [InlineData("Bearer ")]
-    [InlineData("Basic right-key")]
-    public async Task Auth_KeysConfiguredAndWrongHeader_Returns401(string? header)
-    {
-        await using var engine = new EngineFactory("right-key");
-        using var client = engine.CreateClient();
-        if (header is not null)
-        {
-            client.DefaultRequestHeaders.TryAddWithoutValidation("Authorization", header);
-        }
-
-        using var models = await client.GetAsync(new Uri("/v1/models", UriKind.Relative), TestContext.Current.CancellationToken);
-        using var content = new StringContent(ValidBody, Encoding.UTF8, "application/json");
-        using var chat = await client.PostAsync(new Uri("/v1/chat/completions", UriKind.Relative), content, TestContext.Current.CancellationToken);
-
-        Assert.Equal(HttpStatusCode.Unauthorized, models.StatusCode);
-        Assert.Equal(HttpStatusCode.Unauthorized, chat.StatusCode);
-        Assert.Equal("Bearer", models.Headers.WwwAuthenticate.ToString());
-        await AssertErrorFormatAsync(models, "authentication_error");
-        await AssertErrorFormatAsync(chat, "authentication_error");
-        Assert.Null(engine.Provider.LastRequest);
-    }
-
-    /// <summary>The API accepts the correct key, and any one of several keys works.</summary>
-    /// <param name="key">The key to send.</param>
-    /// <returns>A task for the test.</returns>
-    [Theory]
-    [InlineData("first-key")]
-    [InlineData("second-key")]
-    public async Task Auth_CorrectKey_Succeeds(string key)
-    {
-        await using var engine = new EngineFactory("first-key", "second-key");
-        using var client = engine.CreateClient();
-        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", key);
-
-        using var response = await client.GetAsync(new Uri("/v1/models", UriKind.Relative), TestContext.Current.CancellationToken);
-
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-    }
-
-    /// <summary>A blank configured key must never let anyone in. It also does not count as protection.</summary>
-    /// <returns>A task for the test.</returns>
-    [Fact]
-    public async Task Auth_OnlyBlankKeysConfigured_CountsAsNoKeys()
-    {
-        await using var engine = new EngineFactory(string.Empty, "  ", "real-key");
-        using var client = engine.CreateClient();
-        client.DefaultRequestHeaders.TryAddWithoutValidation("Authorization", "Bearer ");
-
-        using var response = await client.GetAsync(new Uri("/v1/models", UriKind.Relative), TestContext.Current.CancellationToken);
-
-        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
-    }
-
     /// <summary>A route that does not exist uses the same error format as every other error.</summary>
     /// <returns>A task for the test.</returns>
     [Fact]
@@ -439,12 +378,12 @@ public class ApiTests
         Assert.Contains("turned off", body.RootElement.GetProperty("message").GetString(), StringComparison.Ordinal);
     }
 
-    /// <summary>Health needs no key, stays 200 while the local model is not ready, and explains what is wrong.</summary>
+    /// <summary>Health stays 200 while the local model is not ready, and explains what is wrong.</summary>
     /// <returns>A task for the test.</returns>
     [Fact]
-    public async Task Health_LocalModelMissing_ReportsDegradedWithoutKey()
+    public async Task Health_LocalModelMissing_ReportsDegraded()
     {
-        await using var engine = new EngineFactory("right-key");
+        await using var engine = new EngineFactory();
         using var client = engine.CreateClient();
 
         // The check runs on a background service, so its first stage may still be "starting".

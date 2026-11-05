@@ -67,20 +67,19 @@ curl http://127.0.0.1:8420/v1/chat/completions \
   -d '{"model":"anthropic/claude-sonnet-5-5","system":"Answer in one sentence.","max_tokens":256,"messages":[{"role":"user","content":"Hello"}]}'
 ```
 
-| Route | Key required | Purpose |
-|---|---|---|
-| `POST /v1/chat/completions` | Yes, if you set keys | Chat, with or without streaming. The accepted fields depend on the provider. See [Request templates](#request-templates). |
-| `GET /v1/models` | Yes, if you set keys | Lists the configured models as `provider/model`. |
-| `GET /health` | No | Returns `status` (`healthy` or `degraded`), `local` (`ready`, `starting`, `restarting`, `missing`, `stopped` or `disabled`) and `message`, which explains `local`. It always returns 200, including while the local model loads. Read `local` to see whether the local model is ready. |
-| `GET /swagger` | No | Swagger UI. Development only. |
-| `GET /openapi/v1.json` | No | The OpenAPI document. Development only. |
+| Route | Purpose |
+|---|---|
+| `POST /v1/chat/completions` | Chat, with or without streaming. The accepted fields depend on the provider. See [Request templates](#request-templates). |
+| `GET /v1/models` | Lists the configured models as `provider/model`. |
+| `GET /health` | Returns `status` (`healthy` or `degraded`), `local` (`ready`, `starting`, `restarting`, `missing`, `stopped` or `disabled`) and `message`, which explains `local`. It always returns 200, including while the local model loads. Read `local` to see whether the local model is ready. |
+| `GET /swagger` | Swagger UI. Development only. |
+| `GET /openapi/v1.json` | The OpenAPI document. Development only. |
 
 Answers are text only. `tools` and `n` are not in any template, because the unified response carries one text answer. The engine forwards images in messages to the provider unchanged. The vendor and the model decide whether images work.
 
 | Status | Meaning |
 |---|---|
 | 400 | The request is invalid, including a field the provider does not list, or the provider rejected it. |
-| 401 | The API key is missing or wrong. |
 | 404 | The route, provider or model does not exist. A cloud provider with no API key counts as not existing. |
 | 405 | The route exists, but does not accept this HTTP method. |
 | 415 | The `Content-Type` is not `application/json`. |
@@ -136,9 +135,9 @@ These statements were not tested against live vendor APIs.
 
 ## Configure
 
-Settings live in `appsettings.json`, next to the program. Each one can be overridden with an environment variable, using `__` between levels.
+Settings live in `appsettings.json`, next to the program. This file lists every setting of the engine's own sections (`LocalModel` and `Providers`), and also `Urls` and `AllowedHosts`. ASP.NET has more listening settings, such as `Kestrel:Endpoints`, that are not in this file. Each setting can be overridden with an environment variable, using `__` between levels.
 
-**Keep API keys in environment variables, never in a file in source control.**
+**Keep API keys in environment variables, never in a file in source control.** Each provider's `ApiKey` stays blank in `appsettings.json`.
 
 | Environment variable | Purpose |
 |---|---|
@@ -149,8 +148,7 @@ Settings live in `appsettings.json`, next to the program. Each one can be overri
 | `Providers__<name>__RequestTimeoutSeconds` | How long to wait for the provider to start its answer, across all retries. The default is 600. |
 | `Providers__<name>__DefaultMaxTokens` | The token limit when a caller sends none. Only Anthropic uses it, because its API requires a limit. The default is 4096. |
 | `Providers__<name>__RequestFields__0` | Sets the field at index 0 of a provider's request template. Add more with `__1`, `__2` and so on. Overrides replace entries by index, and they cannot shorten the list. To remove a field, edit `appsettings.json`. |
-| `Engine__ApiKeys__0` | A key callers must send as `Authorization: Bearer <key>`. Add more with `__1`, `__2` and so on. You must include the index. Without it, `Engine__ApiKeys` gives zero keys, which the startup log shows as `Accepted API keys: 0`. |
-| `Urls` | The listening address. The default is `http://127.0.0.1:8420`. |
+| `Urls` | The listening address. It must be a loopback address. The default is `http://127.0.0.1:8420`. |
 | `AllowedHosts` | The host names callers may use. The default allows only loopback names. |
 | `LocalModel__ContextSize` | The context size in tokens. The default is 8192. |
 | `LocalModel__GpuLayers` | `auto` (default), `all`, or a number. Use `0` to run on the CPU only. |
@@ -189,15 +187,7 @@ The `BaseUrl` must use `https`. The engine accepts `http` only for an address on
 
 ### Reach the engine from other machines
 
-By default only programs on the same machine can connect. To open it to the network, set all three of these:
-
-```bash
-export Urls="http://0.0.0.0:8420"
-export Engine__ApiKeys__0="<a long random key>"
-export AllowedHosts="my-server.example.com"
-```
-
-The engine refuses to start on a network address without an API key. It serves plain HTTP, so use a TLS proxy for anything beyond a trusted network.
+This is not possible at this time. The API has no authentication, so only programs on the same machine can connect. The engine refuses to start on a network address.
 
 ### Limits
 
@@ -227,13 +217,11 @@ build/                           Pinned versions and the release script
 
 ### Debug with Swagger
 
-In the Development environment, the API serves Swagger UI at `/swagger`. The OpenAPI document is at `/openapi/v1.json`. Neither route needs an API key.
+In the Development environment, the API serves Swagger UI at `/swagger`. The OpenAPI document is at `/openapi/v1.json`.
 
 Release packages run as Production, so these routes return 404 there. To show them in a package, start it with `ASPNETCORE_ENVIRONMENT=Development`.
 
 `dotnet run --project src/XatLlmEngine.Host` uses the `Debug` profile in `src/XatLlmEngine.Host/Properties/launchSettings.json`. That profile sets Development and listens on `http://127.0.0.1:8420`. Debugging in an IDE uses the same profile and opens Swagger UI in a browser.
-
-If you set API keys, use the Authorize button in Swagger UI to send one.
 
 Swagger UI shows a streamed answer only after the stream has finished. To watch a stream as it arrives, use `curl` or a client library.
 

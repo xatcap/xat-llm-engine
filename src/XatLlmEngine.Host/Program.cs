@@ -1,7 +1,6 @@
 using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using System.Text.Json.Nodes;
-using Microsoft.Extensions.Options;
 using XatLlmEngine.Application;
 using XatLlmEngine.Application.Abstractions;
 using XatLlmEngine.Host;
@@ -19,8 +18,6 @@ var builder = WebApplication.CreateBuilder(new WebApplicationOptions
 
 ListenAddressPolicy.EnsureAllowed(builder.Configuration);
 
-builder.Services.Configure<EngineOptions>(builder.Configuration.GetSection(EngineOptions.SectionName));
-builder.Services.AddSingleton<ApiKeyEndpointFilter>();
 builder.Services.AddHealthChecks();
 builder.Services.ConfigureHttpJsonOptions(options =>
 {
@@ -47,21 +44,19 @@ app.UseExceptionHandler(errorApp => errorApp.Run(async context =>
 }));
 app.UseStatusCodePages(pages => ErrorMapping.WriteStatusAsync(pages.HttpContext));
 
-var api = app.MapGroup("/v1").AddEndpointFilter<ApiKeyEndpointFilter>();
+var api = app.MapGroup("/v1");
 api.MapPost("/chat/completions", ChatCompletionsEndpoint.HandleAsync)
     .WithDescription("Set 'stream' to true to receive server-sent events (text/event-stream) instead of JSON. Swagger UI shows a stream only after it has finished.")
     .Accepts<JsonObject>("application/json")
     .Produces<ChatCompletionResponse>()
     .Produces<ErrorResponse>(StatusCodes.Status400BadRequest)
-    .Produces<ErrorResponse>(StatusCodes.Status401Unauthorized)
     .Produces<ErrorResponse>(StatusCodes.Status404NotFound)
     .Produces<ErrorResponse>(StatusCodes.Status415UnsupportedMediaType)
     .Produces<ErrorResponse>(StatusCodes.Status429TooManyRequests)
     .Produces<ErrorResponse>(StatusCodes.Status502BadGateway)
     .Produces<ErrorResponse>(StatusCodes.Status503ServiceUnavailable);
 api.MapGet("/models", ModelsEndpoint.Handle)
-    .Produces<ModelListResponse>()
-    .Produces<ErrorResponse>(StatusCodes.Status401Unauthorized);
+    .Produces<ModelListResponse>();
 app.MapHealthChecks("/health", new HealthCheckOptions { ResponseWriter = HealthResponseWriter.WriteAsync });
 
 // The API documentation is for debugging only. A release package runs as Production, so it does not expose these routes.
@@ -73,9 +68,7 @@ if (app.Environment.IsDevelopment())
 
 var startupLogger = app.Services.GetRequiredService<ILogger<Program>>();
 var enabledProviders = string.Join(", ", app.Services.GetServices<IChatProvider>().Select(provider => provider.Name));
-var apiKeyCount = app.Services.GetRequiredService<IOptions<EngineOptions>>().Value.EffectiveKeys.Count;
 StartupLog.EnabledProviders(startupLogger, enabledProviders);
-StartupLog.ApiKeys(startupLogger, apiKeyCount);
 
 await app.RunAsync().ConfigureAwait(false);
 

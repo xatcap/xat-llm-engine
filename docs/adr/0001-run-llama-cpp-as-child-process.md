@@ -17,7 +17,7 @@ The engine starts the official `llama-server` program as a child process and cal
 - It restarts the server after a crash or a hang. A hang is three failed health checks in a row.
 - It stops the server when the engine stops.
 
-The key goes through the `LLAMA_API_KEY` environment variable, because command-line arguments are visible to other users on the machine. The engine also removes its own `Providers__*` and `Engine__*` variables from the server's environment, so the server never sees cloud or caller keys.
+The key goes through the `LLAMA_API_KEY` environment variable, because command-line arguments are visible to other users on the machine. The engine also removes its own `Providers__*` variables from the server's environment, so the server never sees cloud keys.
 
 ## Consequences
 
