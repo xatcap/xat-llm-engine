@@ -8,6 +8,7 @@ Commands:
   finalize    Checks the size limit and writes SHA256SUMS for a folder of release files.
 """
 import argparse
+import contextlib
 import hashlib
 import json
 import os
@@ -99,6 +100,30 @@ def stop_engine(engine, rid):
         subprocess.run(["taskkill", "/T", "/F", "/PID", str(engine.pid)], check=False)
     else:
         engine.terminate()
+
+
+@contextlib.contextmanager
+def work_folder(parent):
+    """Gives a temporary folder and removes it afterwards, because the folder sits in the cached model folder and must not be cached."""
+    work = tempfile.mkdtemp(dir=parent)
+    try:
+        yield work
+    finally:
+        remove_folder(Path(work))
+
+
+def remove_folder(folder, attempts=30):
+    """Removes a folder, retrying because Windows refuses to delete a program's files until the stopped program has fully gone."""
+    for attempt in range(1, attempts + 1):
+        try:
+            shutil.rmtree(folder)
+        except PermissionError as error:
+            if attempt == attempts:
+                raise
+            print(f"Could not remove the folder yet (attempt {attempt}): {error}", flush=True)
+            time.sleep(1)
+        else:
+            return
 
 
 def version_argument(value):
@@ -202,7 +227,7 @@ def smoke_test(args):
     prompt = [{"role": "user", "content": "Reply with the single word: hello"}]
     model = Path(args.model).resolve()
     # Next to the model, because a hard link cannot cross disks. On Windows runners the temp folder is on another disk.
-    with tempfile.TemporaryDirectory(dir=model.parent) as work:
+    with work_folder(model.parent) as work:
         extract(args.package, work)
         roots = [path for path in Path(work).iterdir() if path.is_dir()]
         if len(roots) != 1:
