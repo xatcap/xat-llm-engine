@@ -72,7 +72,7 @@ public static class DependencyInjection
         services.AddHostedService(provider => provider.GetRequiredService<LlamaServerSupervisor>());
         services.AddSingleton<IChatProvider>(provider => new LocalChatProvider(
             provider.GetRequiredService<LlamaServerSupervisor>(),
-            new OpenAiClient(LocalChatProvider.ProviderName, provider.GetRequiredService<IHttpClientFactory>(), LocalHttpClientName, useMaxCompletionTokens: false),
+            new OpenAiClient(LocalChatProvider.ProviderName, provider.GetRequiredService<IHttpClientFactory>(), LocalHttpClientName),
             provider.GetRequiredService<IOptions<LlamaCppOptions>>()));
         services.AddHealthChecks().AddCheck<LlamaServerHealthCheck>(LocalChatProvider.ProviderName);
     }
@@ -108,7 +108,7 @@ public static class DependencyInjection
             var factory = provider.GetRequiredService<IHttpClientFactory>();
             return options.Type == ProviderType.Anthropic
                 ? new AnthropicChatProvider(name, options, factory, clientName)
-                : new OpenAiCompatibleChatProvider(name, options, new OpenAiClient(name, factory, clientName, options.UseMaxCompletionTokens));
+                : new OpenAiCompatibleChatProvider(name, options, new OpenAiClient(name, factory, clientName));
         });
     }
 

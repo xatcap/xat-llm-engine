@@ -20,7 +20,7 @@ internal sealed class ApiDocumentTransformer : IOpenApiDocumentTransformer
             return;
         }
 
-        body.Description = "The chat request. Only 'model' and 'messages' are required.";
+        body.Description = "The chat request, in the format of the provider named in 'model'. A field that provider does not list returns a 400 error.";
         if (body.Content?["application/json"] is OpenApiMediaType media)
         {
             media.Example = JsonNode.Parse("""{"model":"local/ministral-3-3b","messages":[{"role":"user","content":"Hello"}]}""");

@@ -44,25 +44,26 @@ public class AnthropicProviderTests
 
         """;
 
-    /// <summary>The request has Anthropic's headers, and system messages move to the top-level field.</summary>
+    /// <summary>The request has Anthropic's headers, and the caller's fields arrive unchanged in Anthropic's own format.</summary>
     /// <returns>A task for the test.</returns>
     [Fact]
     public async Task Complete_SendsExpectedRequest()
     {
         var http = new StubHttpHandler(HttpStatusCode.OK, CompletionBody);
+        var request = TestRequests.Parse("""{"model":"anthropic/model-x","system":"Be brief.","max_tokens":100,"stop_sequences":["END"],"top_k":5,"messages":[{"role":"user","content":[{"type":"text","text":"Hello"}]}]}""");
 
-        await Provider(http).CompleteAsync(TestRequests.Full, TestContext.Current.CancellationToken);
+        await Provider(http).CompleteAsync(request, TestContext.Current.CancellationToken);
 
         Assert.Equal("https://api.anthropic.test/v1/messages", http.LastRequest!.RequestUri!.ToString());
         Assert.Equal("secret", http.LastRequest.Headers.GetValues("x-api-key").Single());
         Assert.Equal("2023-06-01", http.LastRequest.Headers.GetValues("anthropic-version").Single());
         using var body = JsonDocument.Parse(http.LastBody!);
+        Assert.Equal("model-x", body.RootElement.GetProperty("model").GetString());
         Assert.Equal("Be brief.", body.RootElement.GetProperty("system").GetString());
-        var messages = body.RootElement.GetProperty("messages");
-        Assert.Equal(1, messages.GetArrayLength());
-        Assert.Equal("user", messages[0].GetProperty("role").GetString());
         Assert.Equal(100, body.RootElement.GetProperty("max_tokens").GetInt32());
         Assert.Equal("END", body.RootElement.GetProperty("stop_sequences")[0].GetString());
+        Assert.Equal(5, body.RootElement.GetProperty("top_k").GetInt32());
+        Assert.Equal("Hello", body.RootElement.GetProperty("messages")[0].GetProperty("content")[0].GetProperty("text").GetString());
     }
 
     /// <summary>Anthropic requires a token limit, so the configured default fills it in.</summary>

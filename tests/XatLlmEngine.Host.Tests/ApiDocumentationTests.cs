@@ -59,14 +59,11 @@ public class ApiDocumentationTests
         Assert.True(chat.TryGetProperty("security", out _));
         Assert.True(paths.GetProperty("/v1/models").TryGetProperty("get", out _));
 
-        var request = document.RootElement.GetProperty("components").GetProperty("schemas").GetProperty("ChatCompletionRequest").GetProperty("properties");
-        Assert.True(request.TryGetProperty("max_completion_tokens", out _));
-        Assert.True(request.TryGetProperty("top_p", out _));
         Assert.True(document.RootElement.GetProperty("components").GetProperty("securitySchemes").TryGetProperty("Bearer", out _));
         Assert.Equal("xat-llm-engine", document.RootElement.GetProperty("info").GetProperty("title").GetString());
     }
 
-    /// <summary>The document matches what the API really accepts: only two required fields, and numbers that must be numbers.</summary>
+    /// <summary>The document says that the request format depends on the provider, because each provider has its own template.</summary>
     /// <returns>A task for the test.</returns>
     [Fact]
     public async Task Document_MatchesRequestRules()
@@ -77,11 +74,8 @@ public class ApiDocumentationTests
         var text = await client.GetStringAsync(new Uri("/openapi/v1.json", UriKind.Relative), TestContext.Current.CancellationToken);
 
         using var document = JsonDocument.Parse(text);
-        var schema = document.RootElement.GetProperty("components").GetProperty("schemas").GetProperty("ChatCompletionRequest");
-        Assert.Equal(["messages", "model"], schema.GetProperty("required").EnumerateArray().Select(item => item.GetString()!).Order());
-        Assert.DoesNotContain("string", schema.GetProperty("properties").GetProperty("max_tokens").GetRawText(), StringComparison.Ordinal);
         var body = document.RootElement.GetProperty("paths").GetProperty("/v1/chat/completions").GetProperty("post").GetProperty("requestBody");
-        Assert.Contains("'model' and 'messages'", body.GetProperty("description").GetString(), StringComparison.Ordinal);
+        Assert.Contains("the provider named in 'model'", body.GetProperty("description").GetString(), StringComparison.Ordinal);
     }
 
     /// <summary>The example that Swagger UI fills in must be a request the API accepts.</summary>

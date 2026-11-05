@@ -1,7 +1,9 @@
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Runtime.CompilerServices;
+using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Polly.Timeout;
 using XatLlmEngine.Application.Abstractions;
 using XatLlmEngine.Domain;
@@ -12,12 +14,10 @@ namespace XatLlmEngine.Infrastructure.Providers.OpenAiCompatible;
 /// <param name="providerName">The provider's name, for error messages.</param>
 /// <param name="httpClientFactory">Creates HTTP clients, so that connections are pooled properly.</param>
 /// <param name="httpClientName">The named client, which carries the provider's resilience settings.</param>
-/// <param name="useMaxCompletionTokens">Whether to send the newer token limit field.</param>
 internal sealed class OpenAiClient(
     string providerName,
     IHttpClientFactory httpClientFactory,
-    string httpClientName,
-    bool useMaxCompletionTokens)
+    string httpClientName)
 {
     /// <summary>The value a server sends as the last stream event.</summary>
     private const string StreamEnd = "[DONE]";
@@ -88,7 +88,7 @@ internal sealed class OpenAiClient(
             }
         }
 
-        return Result<IAsyncEnumerable<ChatChunk>>.Ok(ReadChunksAsync(response, cancellationToken));
+        return Result<IAsyncEnumerable<ChatChunk>>.Ok(ReadChunksAsync(response, WantsUsage(request), cancellationToken));
     }
 
     /// <summary>Converts a provider's finish reason.</summary>
@@ -108,15 +108,34 @@ internal sealed class OpenAiClient(
     private static TokenUsage? ToUsage(OpenAiUsage? usage) =>
         usage is null ? null : new TokenUsage(usage.PromptTokens, usage.CompletionTokens);
 
-    /// <summary>Converts a message role to its wire value.</summary>
-    /// <param name="role">The role.</param>
-    /// <returns>The wire value.</returns>
-    private static string ToWire(ChatRole role) => role switch
+    /// <summary>Builds the body to send. The caller's fields pass through unchanged.</summary>
+    /// <param name="request">The routed request.</param>
+    /// <param name="stream">Whether to ask for a stream.</param>
+    /// <returns>The body.</returns>
+    private static JsonObject ToWire(ChatRequest request, bool stream)
     {
-        ChatRole.System => "system",
-        ChatRole.Assistant => "assistant",
-        _ => "user",
-    };
+        var body = request.Body.DeepClone().AsObject();
+        body["model"] = request.Model;
+        if (stream)
+        {
+            body["stream"] = true;
+        }
+        else
+        {
+            body.Remove("stream");
+        }
+
+        return body;
+    }
+
+    /// <summary>Tells whether the caller asked for token counts in a stream.</summary>
+    /// <param name="request">The routed request.</param>
+    /// <returns><see langword="true"/> when the caller set <c>stream_options.include_usage</c>.</returns>
+    private static bool WantsUsage(ChatRequest request) =>
+        request.Body["stream_options"] is JsonObject streamOptions
+        && streamOptions["include_usage"] is JsonValue value
+        && value.TryGetValue<bool>(out var includeUsage)
+        && includeUsage;
 
     /// <summary>Sends the request and returns as soon as response headers arrive, so that streams are not buffered.</summary>
     /// <param name="baseUrl">The server's base address.</param>
@@ -124,11 +143,11 @@ internal sealed class OpenAiClient(
     /// <param name="body">The request body.</param>
     /// <param name="cancellationToken">Cancels the request.</param>
     /// <returns>The response, which the caller must dispose.</returns>
-    private async Task<HttpResponseMessage> SendAsync(Uri baseUrl, string apiKey, OpenAiChatRequest body, CancellationToken cancellationToken)
+    private async Task<HttpResponseMessage> SendAsync(Uri baseUrl, string apiKey, JsonObject body, CancellationToken cancellationToken)
     {
         using var message = new HttpRequestMessage(HttpMethod.Post, new Uri($"{baseUrl.ToString().TrimEnd('/')}/chat/completions"))
         {
-            Content = JsonContent.Create(body, ProviderJson.Default.OpenAiChatRequest),
+            Content = new StringContent(body.ToJsonString(), Encoding.UTF8, "application/json"),
         };
         message.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
 
@@ -136,26 +155,12 @@ internal sealed class OpenAiClient(
         return await client.SendAsync(message, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
     }
 
-    /// <summary>Builds the request body.</summary>
-    /// <param name="request">The validated request.</param>
-    /// <param name="stream">Whether to ask for a stream.</param>
-    /// <returns>The request body.</returns>
-    private OpenAiChatRequest ToWire(ChatRequest request, bool stream) => new(
-        request.Model,
-        [.. request.Messages.Select(message => new OpenAiMessage(ToWire(message.Role), message.Content))],
-        request.Temperature,
-        request.TopP,
-        useMaxCompletionTokens ? null : request.MaxTokens,
-        useMaxCompletionTokens ? request.MaxTokens : null,
-        request.Stop.Count > 0 ? request.Stop : null,
-        stream ? true : null,
-        stream ? new OpenAiStreamOptions(IncludeUsage: true) : null);
-
     /// <summary>Converts stream events into chunks and releases the connection at the end.</summary>
     /// <param name="response">The successful response, which this method takes ownership of.</param>
+    /// <param name="includeUsage">Whether the caller asked for token counts. Some servers send them anyway, and some clients cannot handle a piece without choices.</param>
     /// <param name="cancellationToken">Cancels reading.</param>
     /// <returns>The chunks that carry something useful.</returns>
-    private async IAsyncEnumerable<ChatChunk> ReadChunksAsync(HttpResponseMessage response, [EnumeratorCancellation] CancellationToken cancellationToken)
+    private async IAsyncEnumerable<ChatChunk> ReadChunksAsync(HttpResponseMessage response, bool includeUsage, [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         await foreach (var item in SseReader.ReadAsync(providerName, response, cancellationToken).ConfigureAwait(false))
         {
@@ -164,7 +169,7 @@ internal sealed class OpenAiClient(
                 yield break;
             }
 
-            var chunk = Parse(item.Data);
+            var chunk = Parse(item.Data, includeUsage);
             if (chunk is not null)
             {
                 yield return chunk;
@@ -174,9 +179,10 @@ internal sealed class OpenAiClient(
 
     /// <summary>Parses one stream event.</summary>
     /// <param name="data">The event's JSON text.</param>
+    /// <param name="includeUsage">Whether to keep token counts.</param>
     /// <returns>A chunk, or <see langword="null"/> when the event carries nothing useful, such as a role-only delta.</returns>
     /// <exception cref="ChatStreamException">The event reports an error or cannot be read.</exception>
-    private ChatChunk? Parse(string data)
+    private ChatChunk? Parse(string data, bool includeUsage)
     {
         OpenAiChatResponse? body;
         try
@@ -196,7 +202,7 @@ internal sealed class OpenAiClient(
         var choice = body?.Choices is [var first, ..] ? first : null;
         var content = choice?.Delta?.Content;
         var finishReason = ToFinishReason(choice?.FinishReason);
-        var usage = ToUsage(body?.Usage);
+        var usage = includeUsage ? ToUsage(body?.Usage) : null;
         return string.IsNullOrEmpty(content) && finishReason is null && usage is null
             ? null
             : new ChatChunk(string.IsNullOrEmpty(content) ? null : content, finishReason, usage);

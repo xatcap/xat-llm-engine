@@ -1,29 +1,5 @@
 namespace XatLlmEngine.Infrastructure.Providers.Anthropic;
 
-/// <summary>The body of a Messages API request.</summary>
-/// <param name="Model">The model name.</param>
-/// <param name="MaxTokens">The token limit, which the API requires.</param>
-/// <param name="Messages">The conversation, without system messages.</param>
-/// <param name="System">The system prompt.</param>
-/// <param name="Temperature">Sampling temperature.</param>
-/// <param name="TopP">Nucleus sampling value.</param>
-/// <param name="StopSequences">Stop sequences.</param>
-/// <param name="Stream">Whether to stream the answer.</param>
-internal sealed record AnthropicRequest(
-    string Model,
-    int MaxTokens,
-    IReadOnlyList<AnthropicMessage> Messages,
-    string? System,
-    double? Temperature,
-    double? TopP,
-    IReadOnlyList<string>? StopSequences,
-    bool? Stream);
-
-/// <summary>A message in the conversation.</summary>
-/// <param name="Role">Either <c>user</c> or <c>assistant</c>.</param>
-/// <param name="Content">The text.</param>
-internal sealed record AnthropicMessage(string Role, string Content);
-
 /// <summary>A complete Messages API response, also carried inside the <c>message_start</c> event.</summary>
 /// <param name="Content">The content blocks of the answer.</param>
 /// <param name="StopReason">Why generation stopped.</param>

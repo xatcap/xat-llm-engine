@@ -1,7 +1,9 @@
 using System.Net.Http.Json;
 using System.Net.ServerSentEvents;
 using System.Runtime.CompilerServices;
+using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Polly.Timeout;
 using XatLlmEngine.Application.Abstractions;
 using XatLlmEngine.Domain;
@@ -9,7 +11,7 @@ using XatLlmEngine.Domain;
 namespace XatLlmEngine.Infrastructure.Providers.Anthropic;
 
 /// <summary>Serves chat requests through the Anthropic Messages API.</summary>
-/// <remarks>The differences from the OpenAI protocol stay inside this adapter, so use cases do not know about them.</remarks>
+/// <remarks>Callers send Anthropic's own request format, and this adapter converts the answer to the engine's unified response.</remarks>
 /// <param name="name">The provider's name.</param>
 /// <param name="options">The provider's settings. Its base URL and key must be set.</param>
 /// <param name="httpClientFactory">Creates HTTP clients, so that connections are pooled properly.</param>
@@ -28,6 +30,9 @@ internal sealed class AnthropicChatProvider(
 
     /// <inheritdoc/>
     public IReadOnlyList<string> Models => options.Models;
+
+    /// <inheritdoc/>
+    public IReadOnlyList<string> RequestFields => options.RequestFields;
 
     /// <inheritdoc/>
     public async Task<Result<ChatCompletion>> CompleteAsync(ChatRequest request, CancellationToken cancellationToken)
@@ -100,11 +105,11 @@ internal sealed class AnthropicChatProvider(
     /// <param name="body">The request body.</param>
     /// <param name="cancellationToken">Cancels the request.</param>
     /// <returns>The response, which the caller must dispose.</returns>
-    private async Task<HttpResponseMessage> SendAsync(AnthropicRequest body, CancellationToken cancellationToken)
+    private async Task<HttpResponseMessage> SendAsync(JsonObject body, CancellationToken cancellationToken)
     {
         using var message = new HttpRequestMessage(HttpMethod.Post, new Uri($"{options.BaseUrl!.ToString().TrimEnd('/')}/v1/messages"))
         {
-            Content = JsonContent.Create(body, ProviderJson.Default.AnthropicRequest),
+            Content = new StringContent(body.ToJsonString(), Encoding.UTF8, "application/json"),
         };
         message.Headers.Add("x-api-key", options.ApiKey);
         message.Headers.Add("anthropic-version", ApiVersion);
@@ -113,27 +118,25 @@ internal sealed class AnthropicChatProvider(
         return await client.SendAsync(message, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
     }
 
-    /// <summary>Builds the request body. System messages move to the top-level field, because the API has no system role.</summary>
-    /// <param name="request">The validated request.</param>
+    /// <summary>Builds the body to send. The caller's fields pass through unchanged, and the token limit the API requires is added when missing.</summary>
+    /// <param name="request">The routed request.</param>
     /// <param name="stream">Whether to ask for a stream.</param>
-    /// <returns>The request body.</returns>
-    private AnthropicRequest ToWire(ChatRequest request, bool stream)
+    /// <returns>The body.</returns>
+    private JsonObject ToWire(ChatRequest request, bool stream)
     {
-        var system = string.Join("\n\n", request.Messages.Where(message => message.Role == ChatRole.System).Select(message => message.Content));
-        var messages = request.Messages
-            .Where(message => message.Role != ChatRole.System)
-            .Select(message => new AnthropicMessage(message.Role == ChatRole.Assistant ? "assistant" : "user", message.Content))
-            .ToList();
+        var body = request.Body.DeepClone().AsObject();
+        body["model"] = request.Model;
+        body["max_tokens"] ??= options.DefaultMaxTokens;
+        if (stream)
+        {
+            body["stream"] = true;
+        }
+        else
+        {
+            body.Remove("stream");
+        }
 
-        return new AnthropicRequest(
-            request.Model,
-            request.MaxTokens ?? options.DefaultMaxTokens,
-            messages,
-            system.Length > 0 ? system : null,
-            request.Temperature,
-            request.TopP,
-            request.Stop.Count > 0 ? request.Stop : null,
-            stream ? true : null);
+        return body;
     }
 
     /// <summary>Converts stream events into chunks and releases the connection at the end.</summary>

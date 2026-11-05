@@ -15,6 +15,9 @@ public interface IChatProvider
     /// <summary>Gets the model names to advertise. A provider may also accept names not in this list.</summary>
     IReadOnlyList<string> Models { get; }
 
+    /// <summary>Gets the request fields this provider accepts, besides <c>model</c> and <c>stream</c>. This list is the provider's request template.</summary>
+    IReadOnlyList<string> RequestFields { get; }
+
     /// <summary>Generates a complete answer.</summary>
     /// <param name="request">The validated request.</param>
     /// <param name="cancellationToken">Cancels generation, for example when the caller disconnects.</param>

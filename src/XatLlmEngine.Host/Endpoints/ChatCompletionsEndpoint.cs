@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Text.Json.Serialization.Metadata;
 using XatLlmEngine.Application.Abstractions;
 using XatLlmEngine.Application.Features.CompleteChat;
@@ -34,40 +35,42 @@ internal static class ChatCompletionsEndpoint
             // JSON content is required because browsers cannot send it across sites without a CORS approval, which the engine never gives.
             if (!context.Request.HasJsonContentType())
             {
-                return Results.Json(
-                    new ErrorResponse(new ErrorDetails("The Content-Type must be application/json.", "invalid_request_error")),
-                    HostJson.Default.ErrorResponse,
-                    statusCode: StatusCodes.Status415UnsupportedMediaType);
+                return ErrorMapping.UnsupportedMediaType();
             }
 
-            ChatCompletionRequest? request;
+            JsonObject? body;
             try
             {
-                request = await JsonSerializer
-                    .DeserializeAsync(context.Request.Body, HostJson.Default.ChatCompletionRequest, cancellationToken)
-                    .ConfigureAwait(false);
+                var node = await JsonNode.ParseAsync(context.Request.Body, cancellationToken: cancellationToken).ConfigureAwait(false);
+                body = node as JsonObject;
+
+                // JSON is checked only on first use, so problems would otherwise fail later as a 500 error, possibly after the provider was called.
+                ReadAll(body);
+                _ = body?.ToJsonString();
             }
-            catch (JsonException)
+            catch (Exception exception) when (exception is JsonException or ArgumentException or InvalidOperationException)
             {
-                return ErrorMapping.ToResult(context, new EngineError(ErrorKind.InvalidRequest, "The request body is not valid JSON for this API."));
+                return ErrorMapping.ToResult(context, new EngineError(ErrorKind.InvalidRequest, "The request body is not valid JSON."));
             }
 
-            if (request is null)
+            if (body is null)
             {
-                return ErrorMapping.ToResult(context, new EngineError(ErrorKind.InvalidRequest, "The request body is required."));
+                return ErrorMapping.ToResult(context, new EngineError(ErrorKind.InvalidRequest, "The request body must be a JSON object."));
             }
 
-            var command = ChatRequestMapper.ToCommand(request);
-            if (!command.IsSuccess)
+            var isStream = false;
+            if (body["stream"] is { } stream && !(stream is JsonValue streamValue && streamValue.TryGetValue(out isStream)))
             {
-                return ErrorMapping.ToResult(context, command.Error);
+                return ErrorMapping.ToResult(context, new EngineError(ErrorKind.InvalidRequest, "The 'stream' field must be true or false."));
             }
 
+            var model = body["model"] is JsonValue modelValue && modelValue.TryGetValue<string>(out var name) ? name : null;
+            var command = new CompleteChatCommand(model, body);
             var id = $"chatcmpl-{Guid.NewGuid():N}";
             var created = timeProvider.GetUtcNow().ToUnixTimeSeconds();
-            return request.Stream == true
-                ? await StreamAsync(context, streamHandler, command.Value!, request.StreamOptions?.IncludeUsage == true, id, created).ConfigureAwait(false)
-                : await CompleteAsync(context, completeHandler, command.Value!, id, created).ConfigureAwait(false);
+            return isStream
+                ? await StreamAsync(context, streamHandler, command, id, created).ConfigureAwait(false)
+                : await CompleteAsync(context, completeHandler, command, id, created).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -76,10 +79,30 @@ internal static class ChatCompletionsEndpoint
         }
     }
 
+    /// <summary>Opens every nested object and array, which fails on a repeated field name.</summary>
+    /// <param name="node">The JSON value.</param>
+    private static void ReadAll(JsonNode? node)
+    {
+        if (node is JsonObject fields)
+        {
+            foreach (var field in fields)
+            {
+                ReadAll(field.Value);
+            }
+        }
+        else if (node is JsonArray items)
+        {
+            foreach (var item in items)
+            {
+                ReadAll(item);
+            }
+        }
+    }
+
     /// <summary>Produces a complete answer.</summary>
     /// <param name="context">The current request.</param>
     /// <param name="handler">The use case.</param>
-    /// <param name="command">The validated-format command.</param>
+    /// <param name="command">The caller's request.</param>
     /// <param name="id">The answer's ID.</param>
     /// <param name="created">The creation time in Unix seconds.</param>
     /// <returns>The HTTP result.</returns>
@@ -110,12 +133,11 @@ internal static class ChatCompletionsEndpoint
     /// </remarks>
     /// <param name="context">The current request.</param>
     /// <param name="handler">The use case.</param>
-    /// <param name="command">The validated-format command.</param>
-    /// <param name="includeUsage">Whether the caller asked for token counts.</param>
+    /// <param name="command">The caller's request.</param>
     /// <param name="id">The answer's ID.</param>
     /// <param name="created">The creation time in Unix seconds.</param>
     /// <returns>The HTTP result.</returns>
-    private static async Task<IResult> StreamAsync(HttpContext context, StreamChatHandler handler, CompleteChatCommand command, bool includeUsage, string id, long created)
+    private static async Task<IResult> StreamAsync(HttpContext context, StreamChatHandler handler, CompleteChatCommand command, string id, long created)
     {
         var cancellationToken = context.RequestAborted;
         var result = await handler.HandleAsync(command, cancellationToken).ConfigureAwait(false);
@@ -178,7 +200,7 @@ internal static class ChatCompletionsEndpoint
                 throw new ChatStreamException(new EngineError(ErrorKind.Upstream, "The provider ended the stream before the answer was complete."));
             }
 
-            if (includeUsage && usage is not null)
+            if (usage is not null)
             {
                 var usagePiece = new ChatCompletionChunkResponse(id, ChunkObject, created, model, [], ToWire(usage));
                 await WriteEventAsync(response, usagePiece, HostJson.Default.ChatCompletionChunkResponse, cancellationToken).ConfigureAwait(false);

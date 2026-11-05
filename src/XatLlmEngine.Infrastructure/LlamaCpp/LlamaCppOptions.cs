@@ -52,4 +52,8 @@ public sealed class LlamaCppOptions
 
     /// <summary>Gets more llama-server arguments, for example <c>--threads 4</c> split into two values.</summary>
     public IReadOnlyList<string> ExtraArguments { get; init; } = [];
+
+    /// <summary>Gets the request fields the local model accepts, besides <c>model</c> and <c>stream</c>. This list is its request template.</summary>
+    [MinLength(1, ErrorMessage = "RequestFields must list at least one field.")]
+    public IReadOnlyList<string> RequestFields { get; init; } = [];
 }

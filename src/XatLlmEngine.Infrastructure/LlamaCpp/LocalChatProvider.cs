@@ -1,3 +1,4 @@
+using System.Text.Json.Nodes;
 using Microsoft.Extensions.Options;
 using XatLlmEngine.Application.Abstractions;
 using XatLlmEngine.Domain;
@@ -22,6 +23,9 @@ internal sealed class LocalChatProvider(
 
     /// <inheritdoc/>
     public IReadOnlyList<string> Models { get; } = [options.Value.ModelName];
+
+    /// <inheritdoc/>
+    public IReadOnlyList<string> RequestFields => options.Value.RequestFields;
 
     /// <inheritdoc/>
     public Task<Result<ChatCompletion>> CompleteAsync(ChatRequest request, CancellationToken cancellationToken)
@@ -71,6 +75,10 @@ internal sealed class LocalChatProvider(
     /// <summary>Applies the local default temperature when the caller sent none.</summary>
     /// <param name="request">The validated request.</param>
     /// <returns>The request to send.</returns>
-    private ChatRequest WithDefaults(ChatRequest request) =>
-        request with { Temperature = request.Temperature ?? options.Value.DefaultTemperature };
+    private ChatRequest WithDefaults(ChatRequest request)
+    {
+        var body = request.Body.DeepClone().AsObject();
+        body["temperature"] ??= options.Value.DefaultTemperature;
+        return request with { Body = body };
+    }
 }

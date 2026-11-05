@@ -303,6 +303,36 @@ public sealed class LlamaServerSupervisorTests : IDisposable
         }
     }
 
+    /// <summary>The local default temperature fills a gap, and never replaces the caller's value.</summary>
+    /// <param name="body">The request body.</param>
+    /// <param name="expected">The temperature that should reach llama-server.</param>
+    /// <returns>A task for the test.</returns>
+    [Theory]
+    [InlineData("""{"messages":[]}""", 0.07)]
+    [InlineData("""{"temperature":0.9,"messages":[]}""", 0.9)]
+    public async Task Complete_Temperature_UsesDefaultOnlyWhenMissing(string body, double expected)
+    {
+        var options = Options();
+        var (supervisor, _) = Create(options);
+        var http = new StubHttpHandler(System.Net.HttpStatusCode.OK, """{"choices":[{"message":{"content":"Hi"},"finish_reason":"stop"}]}""");
+        var provider = new LocalChatProvider(supervisor, new OpenAiClient("local", http, "test"), Microsoft.Extensions.Options.Options.Create(options));
+        await supervisor.StartAsync(TestContext.Current.CancellationToken);
+        try
+        {
+            await WaitForAsync(() => supervisor.State == LlamaServerState.Ready);
+
+            var request = TestRequests.Parse(body) with { Model = "test-model" };
+            await provider.CompleteAsync(request, TestContext.Current.CancellationToken);
+
+            using var sent = System.Text.Json.JsonDocument.Parse(http.LastBody!);
+            Assert.Equal(expected, sent.RootElement.GetProperty("temperature").GetDouble());
+        }
+        finally
+        {
+            await supervisor.StopAsync(CancellationToken.None);
+        }
+    }
+
     /// <summary>A missing model leaves the provider off, with a message that says what to do.</summary>
     /// <returns>A task for the test.</returns>
     [Fact]
@@ -368,7 +398,7 @@ public sealed class LlamaServerSupervisorTests : IDisposable
         var factory = services.BuildServiceProvider().GetRequiredService<IHttpClientFactory>();
         var wrapped = Microsoft.Extensions.Options.Options.Create(options);
         var supervisor = new LlamaServerSupervisor(wrapped, factory, TimeProvider.System, NullLogger<LlamaServerSupervisor>.Instance);
-        var client = new OpenAiClient("local", factory, DependencyInjection.LocalHttpClientName, useMaxCompletionTokens: false);
+        var client = new OpenAiClient("local", factory, DependencyInjection.LocalHttpClientName);
         return (supervisor, new LocalChatProvider(supervisor, client, wrapped));
     }
 }

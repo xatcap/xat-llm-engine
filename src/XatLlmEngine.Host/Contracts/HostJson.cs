@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 
 namespace XatLlmEngine.Host.Contracts;
@@ -8,7 +9,7 @@ namespace XatLlmEngine.Host.Contracts;
     PropertyNamingPolicy = JsonKnownNamingPolicy.SnakeCaseLower,
     DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
     PropertyNameCaseInsensitive = true)]
-[JsonSerializable(typeof(ChatCompletionRequest))]
+[JsonSerializable(typeof(JsonObject))]
 [JsonSerializable(typeof(ChatCompletionResponse))]
 [JsonSerializable(typeof(ChatCompletionChunkResponse))]
 [JsonSerializable(typeof(ErrorResponse))]

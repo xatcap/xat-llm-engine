@@ -32,23 +32,26 @@ public class OpenAiCompatibleProviderTests
 
         """;
 
-    /// <summary>The request has the expected address, key and values.</summary>
+    /// <summary>The request has the expected address and key, and the caller's fields arrive unchanged, including ones the engine does not know.</summary>
     /// <returns>A task for the test.</returns>
     [Fact]
     public async Task Complete_SendsExpectedRequest()
     {
         var http = new StubHttpHandler(HttpStatusCode.OK, CompletionBody);
+        var request = TestRequests.Parse("""{"model":"test/model-x","stream":false,"top_p":0.9,"max_completion_tokens":100,"stop":"END","vendor_field":{"a":1},"messages":[{"role":"developer","content":"Be brief."},{"role":"user","content":[{"type":"image_url","image_url":{"url":"x"}}]}]}""");
 
-        await Provider(http).CompleteAsync(TestRequests.Full, TestContext.Current.CancellationToken);
+        await Provider(http).CompleteAsync(request, TestContext.Current.CancellationToken);
 
         Assert.Equal("https://api.example.com/v1/chat/completions", http.LastRequest!.RequestUri!.ToString());
         Assert.Equal("Bearer secret", http.LastRequest.Headers.Authorization!.ToString());
         using var body = JsonDocument.Parse(http.LastBody!);
         Assert.Equal("model-x", body.RootElement.GetProperty("model").GetString());
-        Assert.Equal("system", body.RootElement.GetProperty("messages")[0].GetProperty("role").GetString());
-        Assert.Equal(100, body.RootElement.GetProperty("max_tokens").GetInt32());
+        Assert.Equal("developer", body.RootElement.GetProperty("messages")[0].GetProperty("role").GetString());
+        Assert.Equal("x", body.RootElement.GetProperty("messages")[1].GetProperty("content")[0].GetProperty("image_url").GetProperty("url").GetString());
+        Assert.Equal(100, body.RootElement.GetProperty("max_completion_tokens").GetInt32());
         Assert.Equal(0.9, body.RootElement.GetProperty("top_p").GetDouble());
-        Assert.Equal("END", body.RootElement.GetProperty("stop")[0].GetString());
+        Assert.Equal("END", body.RootElement.GetProperty("stop").GetString());
+        Assert.Equal(1, body.RootElement.GetProperty("vendor_field").GetProperty("a").GetInt32());
         Assert.False(body.RootElement.TryGetProperty("stream", out _));
     }
 
@@ -68,18 +71,16 @@ public class OpenAiCompatibleProviderTests
         }
     }
 
-    /// <summary>OpenAI's own API needs the newer token limit field.</summary>
+    /// <summary>Sending a request leaves the caller's body unchanged.</summary>
     /// <returns>A task for the test.</returns>
     [Fact]
-    public async Task Complete_UsesMaxCompletionTokens_SendsNewerField()
+    public async Task Complete_DoesNotChangeCallersBody()
     {
-        var http = new StubHttpHandler(HttpStatusCode.OK, CompletionBody);
+        var request = TestRequests.Minimal;
 
-        await Provider(http, useMaxCompletionTokens: true).CompleteAsync(TestRequests.Full, TestContext.Current.CancellationToken);
+        await Provider(new StubHttpHandler(HttpStatusCode.OK, CompletionBody)).CompleteAsync(request, TestContext.Current.CancellationToken);
 
-        using var body = JsonDocument.Parse(http.LastBody!);
-        Assert.Equal(100, body.RootElement.GetProperty("max_completion_tokens").GetInt32());
-        Assert.False(body.RootElement.TryGetProperty("max_tokens", out _));
+        Assert.Equal("test/model-x", request.Body["model"]!.GetValue<string>());
     }
 
     /// <summary>The answer, finish reason and token counts are converted.</summary>
@@ -164,8 +165,9 @@ public class OpenAiCompatibleProviderTests
     public async Task Stream_ValidEvents_ReturnsChunks()
     {
         var http = new StubHttpHandler(HttpStatusCode.OK, StreamBody);
+        var request = TestRequests.Parse("""{"model":"test/model-x","stream_options":{"include_usage":true},"messages":[]}""");
 
-        var result = await Provider(http).StreamAsync(TestRequests.Minimal, TestContext.Current.CancellationToken);
+        var result = await Provider(http).StreamAsync(request, TestContext.Current.CancellationToken);
         var chunks = await result.Value!.ToListAsync(TestContext.Current.CancellationToken);
 
         Assert.Equal(
@@ -179,6 +181,21 @@ public class OpenAiCompatibleProviderTests
         using var body = JsonDocument.Parse(http.LastBody!);
         Assert.True(body.RootElement.GetProperty("stream").GetBoolean());
         Assert.True(body.RootElement.GetProperty("stream_options").GetProperty("include_usage").GetBoolean());
+    }
+
+    /// <summary>Token counts are dropped when the caller did not ask for them, even if the server sends them.</summary>
+    /// <returns>A task for the test.</returns>
+    [Fact]
+    public async Task Stream_UsageNotRequested_DropsUsage()
+    {
+        var http = new StubHttpHandler(HttpStatusCode.OK, StreamBody);
+
+        var result = await Provider(http).StreamAsync(TestRequests.Minimal, TestContext.Current.CancellationToken);
+        var chunks = await result.Value!.ToListAsync(TestContext.Current.CancellationToken);
+
+        Assert.All(chunks, chunk => Assert.Null(chunk.Usage));
+        using var body = JsonDocument.Parse(http.LastBody!);
+        Assert.False(body.RootElement.TryGetProperty("stream_options", out _));
     }
 
     /// <summary>A failure before the stream starts is a normal result.</summary>
@@ -206,10 +223,9 @@ public class OpenAiCompatibleProviderTests
 
     /// <summary>Creates the adapter.</summary>
     /// <param name="http">The stubbed network.</param>
-    /// <param name="useMaxCompletionTokens">Whether to send the newer token limit field.</param>
     /// <returns>The adapter.</returns>
-    private static OpenAiCompatibleChatProvider Provider(StubHttpHandler http, bool useMaxCompletionTokens = false) => new(
+    private static OpenAiCompatibleChatProvider Provider(StubHttpHandler http) => new(
         "test",
         new ProviderOptions { BaseUrl = new Uri("https://api.example.com/v1/"), ApiKey = "secret" },
-        new OpenAiClient("test", http, "test", useMaxCompletionTokens));
+        new OpenAiClient("test", http, "test"));
 }

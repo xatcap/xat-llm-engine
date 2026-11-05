@@ -34,11 +34,7 @@ internal sealed class ApiKeyEndpointFilter : IEndpointFilter
             return await next(context).ConfigureAwait(false);
         }
 
-        context.HttpContext.Response.Headers.WWWAuthenticate = "Bearer";
-        return Results.Json(
-            new ErrorResponse(new ErrorDetails("A valid API key is required in the Authorization header.", "authentication_error")),
-            HostJson.Default.ErrorResponse,
-            statusCode: StatusCodes.Status401Unauthorized);
+        return ErrorMapping.Unauthorized(context.HttpContext);
     }
 
     /// <summary>Hashes a key.</summary>

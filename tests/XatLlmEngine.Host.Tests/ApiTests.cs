@@ -35,16 +35,16 @@ public class ApiTests
         Assert.Equal(5, root.GetProperty("usage").GetProperty("total_tokens").GetInt32());
     }
 
-    /// <summary>All the accepted fields reach the provider, including both forms of message content and stop.</summary>
+    /// <summary>The caller's fields reach the provider unchanged, including message content the engine does not read.</summary>
     /// <returns>A task for the test.</returns>
     [Fact]
-    public async Task Chat_AllFields_ReachProvider()
+    public async Task Chat_ListedFields_ReachProvider()
     {
         await using var engine = new EngineFactory();
         const string Body = """
-            {"model":"fake/model-a","temperature":0.5,"top_p":0.9,"max_tokens":10,"max_completion_tokens":20,"stop":"END",
+            {"model":"fake/model-a","temperature":0.5,
              "messages":[{"role":"developer","content":"Be brief."},
-                         {"role":"user","content":[{"type":"text","text":"Hello "},{"type":"text","text":"there"}]}]}
+                         {"role":"user","content":[{"type":"image_url","image_url":{"url":"x"}}]}]}
             """;
 
         using var response = await PostAsync(engine, Body);
@@ -52,32 +52,26 @@ public class ApiTests
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var request = engine.Provider.LastRequest!;
         Assert.Equal("model-a", request.Model);
-        Assert.Equal(0.5, request.Temperature);
-        Assert.Equal(0.9, request.TopP);
-        Assert.Equal(20, request.MaxTokens);
-        Assert.Equal(["END"], request.Stop);
-        Assert.Equal(new ChatMessage(ChatRole.System, "Be brief."), request.Messages[0]);
-        Assert.Equal(new ChatMessage(ChatRole.User, "Hello there"), request.Messages[1]);
+        Assert.Equal(0.5, request.Body["temperature"]!.GetValue<double>());
+        Assert.Equal("developer", request.Body["messages"]![0]!["role"]!.GetValue<string>());
+        Assert.Equal("x", request.Body["messages"]![1]!["content"]![0]!["image_url"]!["url"]!.GetValue<string>());
     }
 
-    /// <summary>Bad requests return 400 in the OpenAI error format, and unsupported features are never silently ignored.</summary>
+    /// <summary>Bad requests return 400 in the OpenAI error format.</summary>
     /// <param name="body">The request body.</param>
     /// <returns>A task for the test.</returns>
     [Theory]
     [InlineData("not json")]
     [InlineData("null")]
-    [InlineData("""{"model":"fake/model-a","temperature":"hot","messages":[{"role":"user","content":"Hi"}]}""")]
-    [InlineData("""{"model":"no-slash","messages":[{"role":"user","content":"Hi"}]}""")]
-    [InlineData("""{"model":"fake/model-a","messages":[]}""")]
-    [InlineData("""{"model":"fake/model-a"}""")]
-    [InlineData("""{"model":"fake/model-a","messages":[null]}""")]
-    [InlineData("""{"model":"fake/model-a","messages":[{"role":"tool","content":"Hi"}]}""")]
-    [InlineData("""{"model":"fake/model-a","messages":[{"role":"user","content":null}]}""")]
-    [InlineData("""{"model":"fake/model-a","messages":[{"role":"user","content":[{"type":"image_url","image_url":{"url":"x"}}]}]}""")]
-    [InlineData("""{"model":"fake/model-a","stop":5,"messages":[{"role":"user","content":"Hi"}]}""")]
-    [InlineData("""{"model":"fake/model-a","n":2,"messages":[{"role":"user","content":"Hi"}]}""")]
-    [InlineData("""{"model":"fake/model-a","tools":[{"type":"function"}],"messages":[{"role":"user","content":"Hi"}]}""")]
-    [InlineData("""{"model":"fake/model-a","response_format":{"type":"json_object"},"messages":[{"role":"user","content":"Hi"}]}""")]
+    [InlineData("[]")]
+    [InlineData("""{"model":"fake/model-a","model":"fake/model-b","messages":[]}""")]
+    [InlineData("""{"model":"fake/model-a","stream_options":{"include_usage":true,"include_usage":false},"messages":[]}""")]
+    [InlineData("""{"model":"fake/model-a","messages":[{"role":"user","content":"\ud83d"}]}""")]
+    [InlineData("""{"model":"fake/\ud83d","messages":[]}""")]
+    [InlineData("""{"model":"no-slash","messages":[]}""")]
+    [InlineData("""{"model":5,"messages":[]}""")]
+    [InlineData("""{"messages":[]}""")]
+    [InlineData("""{"model":"fake/model-a","stream":"yes","messages":[]}""")]
     public async Task Chat_BadRequest_ReturnsErrorFormat(string body)
     {
         await using var engine = new EngineFactory();
@@ -85,9 +79,44 @@ public class ApiTests
         using var response = await PostAsync(engine, body);
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        await AssertErrorFormatAsync(response, "invalid_request_error");
+    }
+
+    /// <summary>A field outside the provider's template returns a 400 that names it, so it is never silently ignored.</summary>
+    /// <param name="field">The field's name.</param>
+    /// <param name="value">The field's JSON value.</param>
+    /// <returns>A task for the test.</returns>
+    [Theory]
+    [InlineData("seed", "7")]
+    [InlineData("temprature", "0.5")]
+    [InlineData("n", "1")]
+    [InlineData("tools", "[]")]
+    [InlineData("response_format", "null")]
+    public async Task Chat_FieldNotInTemplate_ReturnsErrorNamingIt(string field, string value)
+    {
+        await using var engine = new EngineFactory();
+
+        using var response = await PostAsync(engine, $$"""{"model":"fake/model-a","{{field}}":{{value}},"messages":[]}""");
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         using var json = await ReadJsonAsync(response);
-        Assert.False(string.IsNullOrEmpty(json.RootElement.GetProperty("error").GetProperty("message").GetString()));
-        Assert.Equal("invalid_request_error", json.RootElement.GetProperty("error").GetProperty("type").GetString());
+        Assert.Contains($"'{field}'", json.RootElement.GetProperty("error").GetProperty("message").GetString(), StringComparison.Ordinal);
+        Assert.Null(engine.Provider.LastRequest);
+    }
+
+    /// <summary>Templates are separate: the local model lists top_k and the fake provider does not.</summary>
+    /// <returns>A task for the test.</returns>
+    [Fact]
+    public async Task Chat_SameField_DependsOnProvider()
+    {
+        await using var engine = new EngineFactory();
+
+        using var local = await PostAsync(engine, """{"model":"local/ministral-3-3b","top_k":5,"messages":[]}""");
+        using var fake = await PostAsync(engine, """{"model":"fake/model-a","top_k":5,"messages":[]}""");
+
+        // The local model is absent in this test, so 503 shows that the request passed the template check.
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, local.StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, fake.StatusCode);
     }
 
     /// <summary>Other content types are refused, because that blocks cross-site requests from browsers.</summary>
@@ -102,6 +131,7 @@ public class ApiTests
         using var response = await client.PostAsync(new Uri("/v1/chat/completions", UriKind.Relative), content, TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.UnsupportedMediaType, response.StatusCode);
+        Assert.Contains("application/json", await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken), StringComparison.Ordinal);
     }
 
     /// <summary>An unknown provider returns 404.</summary>
@@ -201,13 +231,13 @@ public class ApiTests
         Assert.Equal(5, usage.RootElement.GetProperty("usage").GetProperty("total_tokens").GetInt32());
     }
 
-    /// <summary>Usage is sent only on request, because some clients cannot handle a piece without choices.</summary>
+    /// <summary>A stream has no usage piece when the provider sent no token counts.</summary>
     /// <returns>A task for the test.</returns>
     [Fact]
-    public async Task Stream_UsageNotRequested_LeavesOutUsagePiece()
+    public async Task Stream_NoUsageFromProvider_LeavesOutUsagePiece()
     {
         await using var engine = new EngineFactory();
-        engine.Provider.Chunks = [new ChatChunk("Hi", FinishReason.Stop, new TokenUsage(3, 2))];
+        engine.Provider.Chunks = [new ChatChunk("Hi", FinishReason.Stop, null)];
 
         using var response = await PostAsync(engine, """{"model":"fake/model-a","stream":true,"messages":[{"role":"user","content":"Hi"}]}""");
 
@@ -326,6 +356,9 @@ public class ApiTests
 
         Assert.Equal(HttpStatusCode.Unauthorized, models.StatusCode);
         Assert.Equal(HttpStatusCode.Unauthorized, chat.StatusCode);
+        Assert.Equal("Bearer", models.Headers.WwwAuthenticate.ToString());
+        await AssertErrorFormatAsync(models, "authentication_error");
+        await AssertErrorFormatAsync(chat, "authentication_error");
         Assert.Null(engine.Provider.LastRequest);
     }
 
@@ -360,7 +393,53 @@ public class ApiTests
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
     }
 
-    /// <summary>Health needs no key, and reports degraded while the local model is not ready.</summary>
+    /// <summary>A route that does not exist uses the same error format as every other error.</summary>
+    /// <returns>A task for the test.</returns>
+    [Fact]
+    public async Task Route_Unknown_ReturnsErrorFormat()
+    {
+        await using var engine = new EngineFactory();
+        using var client = engine.CreateClient();
+
+        using var response = await client.GetAsync(new Uri("/nope", UriKind.Relative), TestContext.Current.CancellationToken);
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        await AssertErrorFormatAsync(response, "not_found_error");
+    }
+
+    /// <summary>A wrong HTTP method uses the same error format as every other error.</summary>
+    /// <returns>A task for the test.</returns>
+    [Fact]
+    public async Task Route_WrongMethod_ReturnsErrorFormat()
+    {
+        await using var engine = new EngineFactory();
+        using var client = engine.CreateClient();
+
+        using var response = await client.DeleteAsync(new Uri("/v1/models", UriKind.Relative), TestContext.Current.CancellationToken);
+
+        Assert.Equal(HttpStatusCode.MethodNotAllowed, response.StatusCode);
+        await AssertErrorFormatAsync(response, "invalid_request_error");
+    }
+
+    /// <summary>Health stays 200 with the local model turned off, and says so.</summary>
+    /// <returns>A task for the test.</returns>
+    [Fact]
+    public async Task Health_LocalModelDisabled_ReportsHealthyWithMessage()
+    {
+        await using var engine = new EngineFactory();
+        var disabled = engine.WithWebHostBuilder(builder => builder.UseSetting("LocalModel:Enabled", "false"));
+        using var client = disabled.CreateClient();
+
+        using var response = await client.GetAsync(new Uri("/health", UriKind.Relative), TestContext.Current.CancellationToken);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using var body = await ReadJsonAsync(response);
+        Assert.Equal("healthy", body.RootElement.GetProperty("status").GetString());
+        Assert.Equal("disabled", body.RootElement.GetProperty("local").GetString());
+        Assert.Contains("turned off", body.RootElement.GetProperty("message").GetString(), StringComparison.Ordinal);
+    }
+
+    /// <summary>Health needs no key, stays 200 while the local model is not ready, and explains what is wrong.</summary>
     /// <returns>A task for the test.</returns>
     [Fact]
     public async Task Health_LocalModelMissing_ReportsDegradedWithoutKey()
@@ -371,6 +450,7 @@ public class ApiTests
         // The check runs on a background service, so its first stage may still be "starting".
         string? local;
         string? status;
+        string? message;
         var attempts = 0;
         do
         {
@@ -379,12 +459,14 @@ public class ApiTests
             using var body = await ReadJsonAsync(response);
             status = body.RootElement.GetProperty("status").GetString();
             local = body.RootElement.GetProperty("local").GetString();
+            message = body.RootElement.GetProperty("message").GetString();
             await Task.Delay(20, TestContext.Current.CancellationToken);
         }
         while (local != "missing" && ++attempts < 200);
 
         Assert.Equal("degraded", status);
         Assert.Equal("missing", local);
+        Assert.Contains("missing", message, StringComparison.Ordinal);
     }
 
     /// <summary>A request with a host name from outside the machine is refused, which blocks DNS rebinding attacks from web pages.</summary>
@@ -411,6 +493,19 @@ public class ApiTests
         using var client = engine.CreateClient();
         using var content = new StringContent(body, Encoding.UTF8, "application/json");
         return await client.PostAsync(new Uri("/v1/chat/completions", UriKind.Relative), content, TestContext.Current.CancellationToken);
+    }
+
+    /// <summary>Checks that a response has the one error format the API uses.</summary>
+    /// <param name="response">The response.</param>
+    /// <param name="type">The expected error category.</param>
+    /// <returns>A task for the check.</returns>
+    private static async Task AssertErrorFormatAsync(HttpResponseMessage response, string type)
+    {
+        Assert.Equal("application/json", response.Content.Headers.ContentType!.MediaType);
+        using var json = await ReadJsonAsync(response);
+        var error = json.RootElement.GetProperty("error");
+        Assert.False(string.IsNullOrEmpty(error.GetProperty("message").GetString()));
+        Assert.Equal(type, error.GetProperty("type").GetString());
     }
 
     /// <summary>Parses a JSON response.</summary>

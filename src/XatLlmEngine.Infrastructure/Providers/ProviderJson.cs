@@ -11,9 +11,7 @@ namespace XatLlmEngine.Infrastructure.Providers;
     DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
     PropertyNameCaseInsensitive = true)]
 [JsonSerializable(typeof(UpstreamErrorEnvelope))]
-[JsonSerializable(typeof(OpenAiChatRequest))]
 [JsonSerializable(typeof(OpenAiChatResponse))]
-[JsonSerializable(typeof(AnthropicRequest))]
 [JsonSerializable(typeof(AnthropicResponse))]
 [JsonSerializable(typeof(AnthropicEvent))]
 internal sealed partial class ProviderJson : JsonSerializerContext;

@@ -1,7 +1,7 @@
 using System.Net;
 using System.Text;
+using System.Text.Json.Nodes;
 using XatLlmEngine.Application.Abstractions;
-using XatLlmEngine.Domain;
 
 namespace XatLlmEngine.Infrastructure.Tests;
 
@@ -36,18 +36,14 @@ internal sealed class StubHttpHandler(HttpStatusCode status, string body) : Http
     }
 }
 
-/// <summary>Shared request values.</summary>
+/// <summary>Shared request values. Each use gets a new body, because tests run in parallel.</summary>
 internal static class TestRequests
 {
-    /// <summary>A request with a system message and sampling values.</summary>
-    public static readonly ChatRequest Full = new(
-        "model-x",
-        [new ChatMessage(ChatRole.System, "Be brief."), new ChatMessage(ChatRole.User, "Hello")],
-        0.5,
-        0.9,
-        100,
-        ["END"]);
+    /// <summary>Gets a request with only a message.</summary>
+    public static ChatRequest Minimal => Parse("""{"model":"test/model-x","messages":[{"role":"user","content":"Hello"}]}""");
 
-    /// <summary>A request with only the required values.</summary>
-    public static readonly ChatRequest Minimal = new("model-x", [new ChatMessage(ChatRole.User, "Hello")], null, null, null, []);
+    /// <summary>Builds a request from a JSON body.</summary>
+    /// <param name="body">The body.</param>
+    /// <returns>The request, for the model <c>model-x</c>.</returns>
+    public static ChatRequest Parse(string body) => new("model-x", JsonNode.Parse(body)!.AsObject());
 }

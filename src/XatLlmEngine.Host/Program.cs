@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
+using System.Text.Json.Nodes;
 using Microsoft.Extensions.Options;
 using XatLlmEngine.Application;
 using XatLlmEngine.Application.Abstractions;
@@ -42,15 +43,14 @@ app.UseExceptionHandler(errorApp => errorApp.Run(async context =>
         StartupLog.UnhandledRequestFailure(context.RequestServices.GetRequiredService<ILogger<Program>>(), failure);
     }
 
-    context.Response.StatusCode = StatusCodes.Status500InternalServerError;
-    var body = new ErrorResponse(new ErrorDetails("The engine failed unexpectedly.", "internal_error"));
-    await context.Response.WriteAsJsonAsync(body, HostJson.Default.ErrorResponse).ConfigureAwait(false);
+    await ErrorMapping.Unexpected().ExecuteAsync(context).ConfigureAwait(false);
 }));
+app.UseStatusCodePages(pages => ErrorMapping.WriteStatusAsync(pages.HttpContext));
 
 var api = app.MapGroup("/v1").AddEndpointFilter<ApiKeyEndpointFilter>();
 api.MapPost("/chat/completions", ChatCompletionsEndpoint.HandleAsync)
     .WithDescription("Set 'stream' to true to receive server-sent events (text/event-stream) instead of JSON. Swagger UI shows a stream only after it has finished.")
-    .Accepts<ChatCompletionRequest>("application/json")
+    .Accepts<JsonObject>("application/json")
     .Produces<ChatCompletionResponse>()
     .Produces<ErrorResponse>(StatusCodes.Status400BadRequest)
     .Produces<ErrorResponse>(StatusCodes.Status401Unauthorized)

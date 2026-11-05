@@ -1,11 +1,14 @@
 # xat-llm-engine
 
-LLM bridge for local or cloud models. It gives other programs one OpenAI-compatible HTTP API for a bundled local model and for cloud providers such as Anthropic, OpenAI and Mistral.
+LLM bridge for local or cloud models. It gives other programs one HTTP API for a bundled local model and for cloud providers such as Anthropic, OpenAI and Mistral.
 
 ## How it works
 
-- Other programs call the engine's API, using any OpenAI client library or plain HTTP.
+- Other programs call the engine's API, using plain HTTP or a client library.
 - The model name selects the provider: `local/ministral-3-3b` or `anthropic/claude-sonnet-5-5`.
+- Each provider has its own request template, in that provider's native format. Send only the fields that provider lists. See [Request templates](#request-templates).
+- OpenAI client libraries work for OpenAI-format providers, such as `local`, `openai` and `mistral`. They do not work for `anthropic/...`, which uses Anthropic's own format.
+- Every provider returns the same OpenAI-style response format.
 - Local requests go to a [llama.cpp](https://github.com/ggml-org/llama.cpp) `llama-server` process, which the engine starts and supervises.
 - Cloud requests go directly to the vendor's API.
 
@@ -56,27 +59,80 @@ for chunk in client.chat.completions.create(
         print(chunk.choices[0].delta.content, end="")
 ```
 
+Anthropic uses its own format, so this request sends `system` and `max_tokens` as top-level fields:
+
+```bash
+curl http://127.0.0.1:8420/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{"model":"anthropic/claude-sonnet-5-5","system":"Answer in one sentence.","max_tokens":256,"messages":[{"role":"user","content":"Hello"}]}'
+```
+
 | Route | Key required | Purpose |
 |---|---|---|
-| `POST /v1/chat/completions` | Yes, if keys are set | Chat, streaming or not. Accepts `messages`, `temperature`, `top_p`, `stop`, `max_tokens`, `max_completion_tokens` and `stream_options.include_usage`. |
+| `POST /v1/chat/completions` | Yes, if keys are set | Chat, streaming or not. The accepted fields depend on the provider. See [Request templates](#request-templates). |
 | `GET /v1/models` | Yes, if keys are set | Lists the configured models as `provider/model`. |
-| `GET /health` | No | Returns `status` (`healthy` or `degraded`) and `local` (`ready`, `starting`, `restarting`, `missing`, `stopped` or `disabled`). |
+| `GET /health` | No | Returns `status` (`healthy` or `degraded`), `local` (`ready`, `starting`, `restarting`, `missing`, `stopped` or `disabled`) and `message`, which explains `local`. It always returns 200, including while the local model loads. Read `local` to see whether the local model is ready. |
 | `GET /swagger` | No | Swagger UI. Development only. |
 | `GET /openapi/v1.json` | No | The OpenAPI document. Development only. |
 
-Text is the only supported content. Tools, images and `n` above 1 return a 400 error, so callers never get a silently different result.
+Answers are text only. `tools` and `n` are not in any template, because the unified response carries one text answer. Images in messages are forwarded to the provider unchanged. Whether they work depends on the vendor and model.
 
 | Status | Meaning |
 |---|---|
-| 400 | The request is invalid, or the provider rejected it. |
+| 400 | The request is invalid, including a field the provider does not list, or the provider rejected it. |
 | 401 | The API key is missing or wrong. |
-| 404 | The provider or model does not exist. A cloud provider with no API key counts as not existing. |
+| 404 | The route, provider or model does not exist. A cloud provider with no API key counts as not existing. |
+| 405 | The route exists, but does not accept this HTTP method. |
 | 415 | The `Content-Type` is not `application/json`. |
 | 429 | The provider is rate limiting. See `Retry-After`. |
 | 502 | The provider failed. |
 | 503 | The local model is loading or missing, or the provider is overloaded or cannot be reached. See `Retry-After`. |
 
+All errors use the body `{"error":{"message","type"}}`. There is one exception. A host name that `AllowedHosts` refuses gets ASP.NET's own HTML 400 response. The server also rejects malformed HTTP before the API runs.
+
 A stream that fails after it has started has already sent status 200. It ends with an `error` event and no `[DONE]` marker.
+
+## Request templates
+
+Each provider accepts only the fields in its template. The engine forwards these fields to the provider unchanged, and it does not check their values. A bad value returns the vendor's own 400 message.
+
+| Provider | Accepted fields |
+|---|---|
+| `local` | `messages`, `temperature`, `top_p`, `max_tokens`, `stop`, `stream_options`, `top_k`, `min_p`, `repeat_penalty`, `seed`, `frequency_penalty`, `presence_penalty`, `response_format`, `grammar` |
+| `anthropic` | `messages`, `system`, `max_tokens`, `temperature`, `top_p`, `top_k`, `stop_sequences`, `metadata` |
+| `openai` | `messages`, `temperature`, `top_p`, `max_completion_tokens`, `stop`, `stream_options`, `seed`, `frequency_penalty`, `presence_penalty`, `response_format`, `reasoning_effort`, `user` |
+| `mistral` | `messages`, `temperature`, `top_p`, `max_tokens`, `stop`, `random_seed`, `safe_prompt`, `frequency_penalty`, `presence_penalty`, `response_format` |
+
+These rules apply to every provider:
+
+- `model` and `stream` are always accepted.
+- Any other top-level field that the template does not list returns a 400 error. The error names the field and lists the accepted fields. This happens even when the field's value is `null` or a default.
+- The local model uses `LocalModel__DefaultTemperature` when a request sends no `temperature`. Anthropic uses `Providers__anthropic__DefaultMaxTokens` when a request sends no `max_tokens`.
+
+Streaming usage depends on the provider:
+
+- OpenAI-format providers send a usage piece only when the caller sets `stream_options.include_usage`.
+- Mistral's template has no `stream_options`, so Mistral streams carry no usage.
+- Anthropic streams always end with a usage piece. Its `choices` is empty.
+
+## Supported models
+
+Not supported on any provider:
+
+- Embeddings and reranking.
+- Image generation.
+- Speech and audio.
+- Legacy models that only offer `/v1/completions`.
+- Models offered only on OpenAI's `/v1/responses` API.
+- Tool calling.
+
+Reasoning output that a model sends in a separate field is dropped. The answer's text is kept.
+
+A cloud vendor works through configuration if it offers an OpenAI-compatible endpoint with Bearer keys. AWS Bedrock's native API does not work. Azure OpenAI's older deployment URLs, which use `api-key` headers, do not work.
+
+The local model can be any GGUF model that the pinned llama.cpp supports. The engine runs one local model at a time. To change it, set `LocalModel__ModelPath` and `LocalModel__ModelName`, then restart the engine. For example, a Qwen model. Other local formats need another local server, added as an `OpenAiCompatible` provider on a loopback address such as `http://127.0.0.1:8000`, with a non-blank `ApiKey`.
+
+These statements were not tested against live vendor APIs.
 
 ## Configure
 
@@ -92,6 +148,7 @@ Settings live in `appsettings.json`, next to the program. Each one can be overri
 | `Providers__<name>__MaxRetries` | How many times to retry a 429, 5xx or unreachable response from that provider. Retries happen only before the answer starts. A `Retry-After` header is followed, up to 30 seconds. The default is 2. |
 | `Providers__<name>__RequestTimeoutSeconds` | How long to wait for the provider to start its answer, across all retries. The default is 600. |
 | `Providers__<name>__DefaultMaxTokens` | The token limit when a caller sends none. Only Anthropic uses it, because its API requires a limit. The default is 4096. |
+| `Providers__<name>__RequestFields__0` | Sets the field at index 0 of a provider's request template. Add more with `__1`, `__2` and so on. Overrides replace entries by index, and they cannot shorten the list. To remove a field, edit `appsettings.json`. |
 | `Engine__ApiKeys__0` | A key callers must send as `Authorization: Bearer <key>`. Add more with `__1`, `__2` and so on. The index is required. Without it, `Engine__ApiKeys` gives zero keys, which the startup log shows as `Accepted API keys: 0`. |
 | `Urls` | The listening address. The default is `http://127.0.0.1:8420`. |
 | `AllowedHosts` | The host names callers may use. The default allows only loopback names. |
@@ -102,6 +159,7 @@ Settings live in `appsettings.json`, next to the program. Each one can be overri
 | `LocalModel__StartupTimeoutSeconds` | How long the model may take to load. The default is 600. |
 | `LocalModel__HealthCheckIntervalSeconds` | Seconds between health checks of a running llama-server. Three failed checks in a row make the engine replace it, because a hung server never exits by itself. The default is 10. |
 | `LocalModel__ExtraArguments__0` | An extra `llama-server` argument. Add more with `__1`, `__2` and so on. |
+| `LocalModel__RequestFields__0` | Sets the field at index 0 of the local model's request template. Add more with `__1`, `__2` and so on. Overrides replace entries by index, and they cannot shorten the list. To remove a field, edit `appsettings.json`. |
 | `LocalModel__Enabled` | Set to `false` to run with cloud providers only. |
 
 `Models` under each provider only controls what `/v1/models` lists. Callers can request any model name the vendor offers, so `openai/<any-model>` works even though the `openai` list is empty by default.
@@ -115,12 +173,17 @@ Any service that speaks the OpenAI protocol needs only configuration. For exampl
   "groq": {
     "Type": "OpenAiCompatible",
     "BaseUrl": "https://api.groq.com/openai/v1",
-    "Models": []
+    "Models": [],
+    "RequestFields": [ "messages", "temperature", "top_p", "max_tokens", "stop", "stream_options", "seed" ]
   }
 }
 ```
 
-Set its key with `Providers__groq__ApiKey`. Use `"UseMaxCompletionTokens": true` if the service needs that field instead of `max_tokens`.
+Set its key with `Providers__groq__ApiKey`. The `RequestFields` list is the provider's request template. The list above is an example. Copy the fields that the vendor really accepts.
+
+A provider entry without `RequestFields` stops the engine at startup, even when that provider has no key. A local model without `RequestFields` also stops the engine at startup, even when the local model is disabled. Custom entries from before this change must add `RequestFields`.
+
+When a vendor adds a request field, add its name to that provider's `RequestFields`. That is one line.
 
 The `BaseUrl` must use `https`. The engine accepts `http` only for an address on this machine, such as `http://127.0.0.1:8000`. Otherwise it refuses to start.
 

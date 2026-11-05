@@ -13,6 +13,9 @@ internal sealed class FakeChatProvider(string name) : IChatProvider
     /// <inheritdoc/>
     public IReadOnlyList<string> Models { get; init; } = [];
 
+    /// <inheritdoc/>
+    public IReadOnlyList<string> RequestFields { get; init; } = ["messages"];
+
     /// <summary>Gets the most recent request.</summary>
     public ChatRequest? LastRequest { get; private set; }
 

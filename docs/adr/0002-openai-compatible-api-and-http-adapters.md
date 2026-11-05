@@ -1,6 +1,6 @@
 # 0002. Expose an OpenAI-compatible API, with plain HTTP adapters
 
-- Status: Accepted
+- Status: Partly replaced by [ADR 0004](0004-one-request-template-per-provider.md)
 - Date: 2026-11-04
 - Deciders: Project maintainer
 

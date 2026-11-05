@@ -21,8 +21,9 @@ public sealed class ProviderOptions
     /// <summary>Gets the model names to advertise. Callers can also request names not listed here.</summary>
     public IReadOnlyList<string> Models { get; init; } = [];
 
-    /// <summary>Gets a value indicating whether to send the token limit as <c>max_completion_tokens</c>, which OpenAI requires, instead of <c>max_tokens</c>.</summary>
-    public bool UseMaxCompletionTokens { get; init; }
+    /// <summary>Gets the request fields this provider accepts, besides <c>model</c> and <c>stream</c>. This list is its request template, so a vendor's new field needs only a change here.</summary>
+    [MinLength(1, ErrorMessage = "RequestFields must list at least one field.")]
+    public IReadOnlyList<string> RequestFields { get; init; } = [];
 
     /// <summary>Gets the token limit to use when a caller sends none. Anthropic requires a limit on every request.</summary>
     [Range(1, int.MaxValue)]
