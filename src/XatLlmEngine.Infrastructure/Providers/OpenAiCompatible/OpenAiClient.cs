@@ -63,7 +63,7 @@ internal sealed class OpenAiClient(
         }
         catch (Exception exception) when (exception is HttpRequestException or TimeoutRejectedException)
         {
-            return Result<ChatCompletion>.Fail(HttpFailure.Unreachable(providerName));
+            return Result<ChatCompletion>.Fail(HttpFailure.Unreachable(providerName, exception, logger));
         }
     }
 
@@ -82,7 +82,7 @@ internal sealed class OpenAiClient(
         }
         catch (Exception exception) when (exception is HttpRequestException or TimeoutRejectedException)
         {
-            return Result<IAsyncEnumerable<ChatChunk>>.Fail(HttpFailure.Unreachable(providerName));
+            return Result<IAsyncEnumerable<ChatChunk>>.Fail(HttpFailure.Unreachable(providerName, exception, logger));
         }
 
         if (!response.IsSuccessStatusCode)
@@ -167,7 +167,7 @@ internal sealed class OpenAiClient(
     /// <returns>The chunks that carry something useful.</returns>
     private async IAsyncEnumerable<ChatChunk> ReadChunksAsync(HttpResponseMessage response, bool includeUsage, [EnumeratorCancellation] CancellationToken cancellationToken)
     {
-        await foreach (var item in SseReader.ReadAsync(providerName, response, cancellationToken).ConfigureAwait(false))
+        await foreach (var item in SseReader.ReadAsync(providerName, response, logger, cancellationToken).ConfigureAwait(false))
         {
             if (item.Data == StreamEnd)
             {

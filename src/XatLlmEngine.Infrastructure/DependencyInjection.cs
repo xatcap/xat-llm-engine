@@ -20,9 +20,6 @@ public static class DependencyInjection
     /// <summary>The HTTP client for llama-server. It has no timeout or retries, because local generation can be slow and a local failure will not fix itself.</summary>
     internal const string LocalHttpClientName = "provider-local";
 
-    /// <summary>The longest wait before one retry, including when a provider's Retry-After header asks for longer.</summary>
-    private static readonly TimeSpan MaximumRetryDelay = TimeSpan.FromSeconds(30);
-
     /// <summary>Adds the local model and every cloud provider that has an API key.</summary>
     /// <param name="services">The service collection to add to.</param>
     /// <param name="configuration">The application configuration.</param>
@@ -97,8 +94,8 @@ public static class DependencyInjection
                         MaxRetryAttempts = options.MaxRetries,
                         BackoffType = DelayBackoffType.Exponential,
                         UseJitter = true,
-                        MaxDelay = MaximumRetryDelay,
-                        DelayGenerator = arguments => ValueTask.FromResult(RetryDelay(arguments.Outcome.Result, timeProvider.GetUtcNow())),
+                        MaxDelay = HttpFailure.MaximumRetryDelay,
+                        DelayGenerator = arguments => ValueTask.FromResult(HttpFailure.RetryDelay(arguments.Outcome.Result, timeProvider.GetUtcNow())),
                     });
                 }
             });
@@ -111,22 +108,6 @@ public static class DependencyInjection
                 ? new AnthropicChatProvider(name, options, factory, clientName, timeProvider, provider.GetRequiredService<ILogger<AnthropicChatProvider>>())
                 : new OpenAiCompatibleChatProvider(name, options, new OpenAiClient(name, factory, clientName, timeProvider, provider.GetRequiredService<ILogger<OpenAiClient>>()));
         });
-    }
-
-    /// <summary>Obeys a provider's Retry-After header, up to the limit. MaxDelay does not limit this header, so without this limit a provider can hold a caller's request for many minutes.</summary>
-    /// <param name="response">The response to retry, if there was one.</param>
-    /// <param name="now">The current time, for a header that holds a date.</param>
-    /// <returns>The delay to use, or <see langword="null"/> to use the normal backoff.</returns>
-    internal static TimeSpan? RetryDelay(HttpResponseMessage? response, DateTimeOffset now)
-    {
-        var header = response?.Headers.RetryAfter;
-        var requested = header?.Delta ?? (header?.Date - now);
-        if (requested is not { } delay)
-        {
-            return null;
-        }
-
-        return delay < TimeSpan.Zero ? TimeSpan.Zero : delay < MaximumRetryDelay ? delay : MaximumRetryDelay;
     }
 
     /// <summary>Checks a cloud provider's settings, so that a mistake stops the engine at startup rather than failing on a request.</summary>

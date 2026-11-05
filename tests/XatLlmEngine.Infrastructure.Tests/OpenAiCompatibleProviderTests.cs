@@ -1,6 +1,9 @@
 using System.Net;
 using System.Text.Json;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Logging.Testing;
+using Polly.Timeout;
 using XatLlmEngine.Application.Abstractions;
 using XatLlmEngine.Domain;
 using XatLlmEngine.Infrastructure.Providers;
@@ -121,6 +124,7 @@ public class OpenAiCompatibleProviderTests
     [Theory]
     [InlineData(HttpStatusCode.TooManyRequests)]
     [InlineData(HttpStatusCode.ServiceUnavailable)]
+    [InlineData((HttpStatusCode)529)]
     public async Task Complete_TemporaryFailureWithRetryAfter_KeepsDelay(HttpStatusCode status)
     {
         var http = new StubHttpHandler(status, "{}") { RetryAfter = TimeSpan.FromSeconds(12) };
@@ -184,6 +188,123 @@ public class OpenAiCompatibleProviderTests
         var result = await Provider(http).CompleteAsync(TestRequests.Minimal, TestContext.Current.CancellationToken);
 
         Assert.Equal(ErrorKind.Unavailable, result.Error!.Kind);
+    }
+
+    /// <summary>A failed response causes one log entry with the provider and the status. The entry never holds the response body or the API key.</summary>
+    /// <returns>A task for the test.</returns>
+    [Fact]
+    public async Task Complete_ErrorStatus_LogsWithoutBodyOrKey()
+    {
+        var logger = new FakeLogger();
+        var http = new StubHttpHandler(HttpStatusCode.Unauthorized, """{"error":{"message":"Incorrect API key provided: sk-abc"}}""");
+
+        await Provider(http, logger).CompleteAsync(TestRequests.Minimal, TestContext.Current.CancellationToken);
+
+        var record = Assert.Single(logger.Collector.GetSnapshot());
+        Assert.Equal(LogLevel.Warning, record.Level);
+        Assert.Contains("401", record.Message, StringComparison.Ordinal);
+        TestLogs.AssertHoldsNone(logger, "sk-abc", "secret");
+    }
+
+    /// <summary>An error that the caller can correct is logged at Debug level only, because the caller already gets the message.</summary>
+    /// <returns>A task for the test.</returns>
+    [Fact]
+    public async Task Complete_BadRequest_LogsAtDebug()
+    {
+        var logger = new FakeLogger();
+
+        await Provider(new StubHttpHandler(HttpStatusCode.BadRequest, "{}"), logger).CompleteAsync(TestRequests.Minimal, TestContext.Current.CancellationToken);
+
+        Assert.Equal(LogLevel.Debug, Assert.Single(logger.Collector.GetSnapshot()).Level);
+    }
+
+    /// <summary>A provider that the engine cannot reach is logged with the cause.</summary>
+    /// <returns>A task for the test.</returns>
+    [Fact]
+    public async Task Complete_ConnectionFails_LogsWarning()
+    {
+        var logger = new FakeLogger();
+        var failure = new HttpRequestException("refused");
+        var http = new StubHttpHandler(HttpStatusCode.OK, string.Empty) { Throw = failure };
+
+        await Provider(http, logger).CompleteAsync(TestRequests.Minimal, TestContext.Current.CancellationToken);
+
+        var record = Assert.Single(logger.Collector.GetSnapshot());
+        Assert.Equal(LogLevel.Warning, record.Level);
+        Assert.Same(failure, record.Exception);
+    }
+
+    /// <summary>A provider that takes too long causes a temporary failure. The engine logs the failure with its cause.</summary>
+    /// <returns>A task for the test.</returns>
+    [Fact]
+    public async Task Complete_Timeout_LogsWarningAndFailsAsUnavailable()
+    {
+        var logger = new FakeLogger();
+        var failure = new TimeoutRejectedException();
+        var http = new StubHttpHandler(HttpStatusCode.OK, string.Empty) { Throw = failure };
+
+        var result = await Provider(http, logger).CompleteAsync(TestRequests.Minimal, TestContext.Current.CancellationToken);
+
+        Assert.Equal(ErrorKind.Unavailable, result.Error!.Kind);
+        var record = Assert.Single(logger.Collector.GetSnapshot());
+        Assert.Equal(LogLevel.Warning, record.Level);
+        Assert.Same(failure, record.Exception);
+    }
+
+    /// <summary>A failed status before a stream starts causes one log entry with the provider and the status. The entry never holds the response body or the API key.</summary>
+    /// <returns>A task for the test.</returns>
+    [Fact]
+    public async Task Stream_ErrorStatus_LogsWithoutBodyOrKey()
+    {
+        var logger = new FakeLogger();
+        var http = new StubHttpHandler(HttpStatusCode.Unauthorized, """{"error":{"message":"Incorrect API key provided: sk-abc"}}""");
+
+        await Provider(http, logger).StreamAsync(TestRequests.Minimal, TestContext.Current.CancellationToken);
+
+        var record = Assert.Single(logger.Collector.GetSnapshot());
+        Assert.Equal(LogLevel.Warning, record.Level);
+        Assert.Contains("401", record.Message, StringComparison.Ordinal);
+        TestLogs.AssertHoldsNone(logger, "sk-abc", "secret");
+    }
+
+    /// <summary>A provider that the engine cannot reach before a stream starts is logged with the cause.</summary>
+    /// <returns>A task for the test.</returns>
+    [Fact]
+    public async Task Stream_ConnectionFails_LogsWarning()
+    {
+        var logger = new FakeLogger();
+        var failure = new HttpRequestException("refused");
+        var http = new StubHttpHandler(HttpStatusCode.OK, string.Empty) { Throw = failure };
+
+        var result = await Provider(http, logger).StreamAsync(TestRequests.Minimal, TestContext.Current.CancellationToken);
+
+        Assert.Equal(ErrorKind.Unavailable, result.Error!.Kind);
+        var record = Assert.Single(logger.Collector.GetSnapshot());
+        Assert.Equal(LogLevel.Warning, record.Level);
+        Assert.Same(failure, record.Exception);
+    }
+
+    /// <summary>A connection that breaks part-way through a stream causes a temporary failure. The engine logs the failure with its cause.</summary>
+    /// <returns>A task for the test.</returns>
+    [Fact]
+    public async Task Stream_FailsPartWay_LogsWarningAndThrows()
+    {
+        var logger = new FakeLogger();
+        var failure = new IOException("reset");
+        var http = new StubHttpHandler(HttpStatusCode.OK, "data: {\"choices\":[{\"delta\":{\"content\":\"Hi\"},\"finish_reason\":null}]}\n\n") { ThrowWhileReading = failure };
+
+        var result = await Provider(http, logger).StreamAsync(TestRequests.Minimal, TestContext.Current.CancellationToken);
+        await using var chunks = result.Value!.GetAsyncEnumerator(TestContext.Current.CancellationToken);
+
+        // The first chunk arrives before the connection breaks, so the failure occurs part-way through the stream.
+        Assert.True(await chunks.MoveNextAsync());
+        Assert.Equal("Hi", chunks.Current.Content);
+        var exception = await Assert.ThrowsAsync<ChatStreamException>(async () => await chunks.MoveNextAsync());
+        Assert.Equal(ErrorKind.Unavailable, exception.Error.Kind);
+        Assert.Same(failure, exception.InnerException);
+        var record = Assert.Single(logger.Collector.GetSnapshot());
+        Assert.Equal(LogLevel.Warning, record.Level);
+        Assert.Same(failure, record.Exception);
     }
 
     /// <summary>The provider converts stream pieces in order, and skips empty pieces.</summary>
@@ -250,9 +371,10 @@ public class OpenAiCompatibleProviderTests
 
     /// <summary>Creates the adapter.</summary>
     /// <param name="http">The stubbed network.</param>
+    /// <param name="logger">The log, or <see langword="null"/> for no log.</param>
     /// <returns>The adapter.</returns>
-    private static OpenAiCompatibleChatProvider Provider(StubHttpHandler http) => new(
+    private static OpenAiCompatibleChatProvider Provider(StubHttpHandler http, ILogger? logger = null) => new(
         "test",
         new ProviderOptions { BaseUrl = new Uri("https://api.example.com/v1/"), ApiKey = "secret" },
-        new OpenAiClient("test", http, "test", TimeProvider.System, NullLogger.Instance));
+        new OpenAiClient("test", http, "test", TimeProvider.System, logger ?? NullLogger.Instance));
 }

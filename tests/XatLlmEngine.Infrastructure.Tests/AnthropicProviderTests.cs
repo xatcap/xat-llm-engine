@@ -1,6 +1,8 @@
 using System.Net;
 using System.Text.Json;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Logging.Testing;
 using XatLlmEngine.Application.Abstractions;
 using XatLlmEngine.Domain;
 using XatLlmEngine.Infrastructure.Providers;
@@ -103,6 +105,55 @@ public class AnthropicProviderTests
         Assert.Equal(ErrorKind.Unavailable, result.Error!.Kind);
     }
 
+    /// <summary>A rate limit keeps the provider's requested wait, so that the engine can pass it to the caller.</summary>
+    /// <returns>A task for the test.</returns>
+    [Fact]
+    public async Task Complete_RateLimitedWithRetryAfter_KeepsDelay()
+    {
+        var http = new StubHttpHandler(HttpStatusCode.TooManyRequests, """{"type":"error","error":{"type":"rate_limit_error","message":"Slow down"}}""")
+        {
+            RetryAfter = TimeSpan.FromSeconds(12),
+        };
+
+        var result = await Provider(http).CompleteAsync(TestRequests.Minimal, TestContext.Current.CancellationToken);
+
+        Assert.Equal(ErrorKind.RateLimited, result.Error!.Kind);
+        Assert.Equal(TimeSpan.FromSeconds(12), result.Error.RetryAfter);
+    }
+
+    /// <summary>A failed response causes one log entry with the provider and the status. The entry never holds the response body or the API key.</summary>
+    /// <returns>A task for the test.</returns>
+    [Fact]
+    public async Task Complete_ErrorStatus_LogsWithoutBodyOrKey()
+    {
+        var logger = new FakeLogger<AnthropicChatProvider>();
+        var http = new StubHttpHandler(HttpStatusCode.Unauthorized, """{"type":"error","error":{"type":"authentication_error","message":"invalid x-api-key sk-abc"}}""");
+
+        await Provider(http, logger).CompleteAsync(TestRequests.Minimal, TestContext.Current.CancellationToken);
+
+        var record = Assert.Single(logger.Collector.GetSnapshot());
+        Assert.Equal(LogLevel.Warning, record.Level);
+        Assert.Contains("401", record.Message, StringComparison.Ordinal);
+        TestLogs.AssertHoldsNone(logger, "sk-abc", "secret");
+    }
+
+    /// <summary>A provider that the engine cannot reach causes a temporary failure. The engine logs the failure with its cause.</summary>
+    /// <returns>A task for the test.</returns>
+    [Fact]
+    public async Task Complete_ConnectionFails_LogsWarning()
+    {
+        var logger = new FakeLogger<AnthropicChatProvider>();
+        var failure = new HttpRequestException("refused");
+        var http = new StubHttpHandler(HttpStatusCode.OK, string.Empty) { Throw = failure };
+
+        var result = await Provider(http, logger).CompleteAsync(TestRequests.Minimal, TestContext.Current.CancellationToken);
+
+        Assert.Equal(ErrorKind.Unavailable, result.Error!.Kind);
+        var record = Assert.Single(logger.Collector.GetSnapshot());
+        Assert.Equal(LogLevel.Warning, record.Level);
+        Assert.Same(failure, record.Exception);
+    }
+
     /// <summary>The provider reports a refusal as a content filter stop.</summary>
     /// <returns>A task for the test.</returns>
     [Fact]
@@ -144,14 +195,47 @@ public class AnthropicProviderTests
             await result.Value!.ToListAsync(TestContext.Current.CancellationToken));
     }
 
+    /// <summary>A connection that breaks part-way through a stream causes a temporary failure. The engine logs the failure with its cause.</summary>
+    /// <returns>A task for the test.</returns>
+    [Fact]
+    public async Task Stream_FailsPartWay_LogsWarningAndThrows()
+    {
+        var logger = new FakeLogger<AnthropicChatProvider>();
+        var failure = new IOException("reset");
+        const string FirstEvents = """
+            event: message_start
+            data: {"type":"message_start","message":{"id":"msg_1","content":[],"stop_reason":null,"usage":{"input_tokens":25,"output_tokens":1}}}
+
+            event: content_block_delta
+            data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hello"}}
+
+
+            """;
+        var http = new StubHttpHandler(HttpStatusCode.OK, FirstEvents) { ThrowWhileReading = failure };
+
+        var result = await Provider(http, logger).StreamAsync(TestRequests.Minimal, TestContext.Current.CancellationToken);
+        await using var chunks = result.Value!.GetAsyncEnumerator(TestContext.Current.CancellationToken);
+
+        // The first chunk arrives before the connection breaks, so the failure occurs part-way through the stream.
+        Assert.True(await chunks.MoveNextAsync());
+        Assert.Equal("Hello", chunks.Current.Content);
+        var exception = await Assert.ThrowsAsync<ChatStreamException>(async () => await chunks.MoveNextAsync());
+        Assert.Equal(ErrorKind.Unavailable, exception.Error.Kind);
+        Assert.Same(failure, exception.InnerException);
+        var record = Assert.Single(logger.Collector.GetSnapshot());
+        Assert.Equal(LogLevel.Warning, record.Level);
+        Assert.Same(failure, record.Exception);
+    }
+
     /// <summary>Creates the adapter.</summary>
     /// <param name="http">The stubbed network.</param>
+    /// <param name="logger">The log, or <see langword="null"/> for no log.</param>
     /// <returns>The adapter.</returns>
-    private static AnthropicChatProvider Provider(StubHttpHandler http) => new(
+    private static AnthropicChatProvider Provider(StubHttpHandler http, ILogger<AnthropicChatProvider>? logger = null) => new(
         "anthropic",
         new ProviderOptions { Type = ProviderType.Anthropic, BaseUrl = new Uri("https://api.anthropic.test"), ApiKey = "secret", DefaultMaxTokens = 777 },
         http,
         "test",
         TimeProvider.System,
-        NullLogger<AnthropicChatProvider>.Instance);
+        logger ?? NullLogger<AnthropicChatProvider>.Instance);
 }

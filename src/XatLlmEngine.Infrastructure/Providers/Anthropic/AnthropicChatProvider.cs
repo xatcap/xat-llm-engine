@@ -68,7 +68,7 @@ internal sealed class AnthropicChatProvider(
         }
         catch (Exception exception) when (exception is HttpRequestException or TimeoutRejectedException)
         {
-            return Result<ChatCompletion>.Fail(HttpFailure.Unreachable(name));
+            return Result<ChatCompletion>.Fail(HttpFailure.Unreachable(name, exception, logger));
         }
     }
 
@@ -82,7 +82,7 @@ internal sealed class AnthropicChatProvider(
         }
         catch (Exception exception) when (exception is HttpRequestException or TimeoutRejectedException)
         {
-            return Result<IAsyncEnumerable<ChatChunk>>.Fail(HttpFailure.Unreachable(name));
+            return Result<IAsyncEnumerable<ChatChunk>>.Fail(HttpFailure.Unreachable(name, exception, logger));
         }
 
         if (!response.IsSuccessStatusCode)
@@ -151,7 +151,7 @@ internal sealed class AnthropicChatProvider(
     private async IAsyncEnumerable<ChatChunk> ReadChunksAsync(HttpResponseMessage response, [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         var inputTokens = 0;
-        await foreach (var item in SseReader.ReadAsync(name, response, cancellationToken).ConfigureAwait(false))
+        await foreach (var item in SseReader.ReadAsync(name, response, logger, cancellationToken).ConfigureAwait(false))
         {
             var streamEvent = Parse(item);
             switch (streamEvent?.Type)
