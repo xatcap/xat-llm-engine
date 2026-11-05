@@ -4,7 +4,6 @@ using System.Globalization;
 using System.Net;
 using System.Net.Sockets;
 using System.Security.Cryptography;
-using System.Text;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -32,9 +31,6 @@ internal sealed partial class LlamaServerSupervisor : BackgroundService
 
     /// <summary>How many health checks in a row must fail before a running server counts as not responding.</summary>
     private const int HungAfterFailedChecks = 3;
-
-    /// <summary>The largest difference between two readings of a process's start time. Some systems calculate it slightly differently each time.</summary>
-    private static readonly TimeSpan StartTimeTolerance = TimeSpan.FromSeconds(5);
 
     /// <summary>The local model settings.</summary>
     private readonly LlamaCppOptions options;
@@ -105,8 +101,8 @@ internal sealed partial class LlamaServerSupervisor : BackgroundService
             return;
         }
 
-        var pidFile = PidFilePath(program);
-        StopLeftoverServer(pidFile, program);
+        var pidFile = LlamaServerPidFile.PidFilePath(program);
+        LlamaServerPidFile.StopLeftoverServer(pidFile, program, logger);
 
         var delay = InitialRestartDelay;
         try
@@ -177,34 +173,6 @@ internal sealed partial class LlamaServerSupervisor : BackgroundService
         }
     }
 
-    /// <summary>Builds a PID file path unique to this install. The file is in the user's private data folder. In a shared temp folder, another user can put a link there, and this process then writes through the link.</summary>
-    /// <param name="program">The llama-server path.</param>
-    /// <returns>The PID file path.</returns>
-    internal static string PidFilePath(string program)
-    {
-        var hash = Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(program)))[..16];
-        var dataFolder = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-        return Path.Combine(string.IsNullOrEmpty(dataFolder) ? AppContext.BaseDirectory : dataFolder, "xat-llm-engine", $"llama-server-{hash}.pid");
-    }
-
-    /// <summary>Builds the text of a PID file. The start time identifies the process, because the system can give the same ID to a later process.</summary>
-    /// <param name="process">The running process.</param>
-    /// <returns>The file's text.</returns>
-    internal static string FormatPidRecord(Process process) =>
-        string.Create(CultureInfo.InvariantCulture, $"{process.Id} {process.StartTime.ToUniversalTime().Ticks}");
-
-    /// <summary>Tells whether a PID file describes this exact process: the same name and the same start time.</summary>
-    /// <param name="process">The process that now has the recorded ID.</param>
-    /// <param name="startTicks">The recorded start time, in UTC ticks.</param>
-    /// <param name="program">The llama-server path.</param>
-    /// <returns><see langword="true"/> when the process is the recorded server.</returns>
-    private static bool IsRecordedServer(Process process, long startTicks, string program) =>
-        string.Equals(
-            process.ProcessName,
-            OperatingSystem.IsWindows() ? Path.GetFileNameWithoutExtension(program) : Path.GetFileName(program),
-            StringComparison.OrdinalIgnoreCase)
-        && (process.StartTime.ToUniversalTime() - new DateTime(startTicks, DateTimeKind.Utc)).Duration() < StartTimeTolerance;
-
     /// <summary>Runs one llama-server process from start to exit.</summary>
     /// <param name="program">The llama-server path.</param>
     /// <param name="pidFile">The PID file path.</param>
@@ -231,7 +199,7 @@ internal sealed partial class LlamaServerSupervisor : BackgroundService
         {
             process.BeginOutputReadLine();
             process.BeginErrorReadLine();
-            WritePidFile(pidFile, FormatPidRecord(process));
+            LlamaServerPidFile.WritePidFile(pidFile, LlamaServerPidFile.FormatPidRecord(process), logger);
             LogStarted(process.Id, port);
 
             var baseUrl = new Uri($"http://{IPAddress.Loopback}:{port}/");
@@ -251,7 +219,7 @@ internal sealed partial class LlamaServerSupervisor : BackgroundService
         {
             endpoint = null;
             await StopProcessAsync(process).ConfigureAwait(false);
-            TryDeletePidFile(pidFile);
+            LlamaServerPidFile.TryDeletePidFile(pidFile, logger);
         }
     }
 
@@ -400,75 +368,6 @@ internal sealed partial class LlamaServerSupervisor : BackgroundService
         LogHung(HungAfterFailedChecks);
     }
 
-    /// <summary>Stops a server that remains after the engine was killed.</summary>
-    /// <remarks>This method checks the name and start time first, because the system can give the old ID to an unrelated program.</remarks>
-    /// <param name="pidFile">The PID file path.</param>
-    /// <param name="program">The llama-server path.</param>
-    private void StopLeftoverServer(string pidFile, string program)
-    {
-        try
-        {
-            var record = File.Exists(pidFile) ? File.ReadAllText(pidFile).Split(' ') : [];
-            if (record.Length != 2
-                || !int.TryParse(record[0], CultureInfo.InvariantCulture, out var pid)
-                || !long.TryParse(record[1], CultureInfo.InvariantCulture, out var startTicks))
-            {
-                return;
-            }
-
-            using var leftover = Process.GetProcessById(pid);
-            if (IsRecordedServer(leftover, startTicks, program))
-            {
-                leftover.Kill(entireProcessTree: true);
-                LogStoppedLeftover(pid);
-            }
-        }
-        catch (Exception exception) when (exception is ArgumentException or InvalidOperationException or Win32Exception or IOException or UnauthorizedAccessException)
-        {
-            // The process has gone, or it belongs to someone else, so there is nothing to stop.
-            LogLeftoverCheckFailed(exception);
-        }
-    }
-
-    /// <summary>Records the running server. The method only logs a failure, because the file is only an aid for cleanup.</summary>
-    /// <param name="pidFile">The PID file path.</param>
-    /// <param name="record">The file's text.</param>
-    private void WritePidFile(string pidFile, string record)
-    {
-        try
-        {
-            var folder = Path.GetDirectoryName(pidFile)!;
-            if (OperatingSystem.IsWindows())
-            {
-                Directory.CreateDirectory(folder);
-            }
-            else
-            {
-                Directory.CreateDirectory(folder, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
-            }
-
-            File.WriteAllText(pidFile, record);
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-        {
-            LogPidFileFailed(exception, pidFile);
-        }
-    }
-
-    /// <summary>Removes the PID file after the server has stopped.</summary>
-    /// <param name="pidFile">The PID file path.</param>
-    private void TryDeletePidFile(string pidFile)
-    {
-        try
-        {
-            File.Delete(pidFile);
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-        {
-            LogPidFileFailed(exception, pidFile);
-        }
-    }
-
     /// <summary>Logs that a required file is missing.</summary>
     /// <param name="program">The llama-server path.</param>
     /// <param name="programFound">Whether llama-server exists.</param>
@@ -527,20 +426,4 @@ internal sealed partial class LlamaServerSupervisor : BackgroundService
     /// <param name="line">The line.</param>
     [LoggerMessage(Level = LogLevel.Debug, Message = "llama-server: {Line}")]
     private partial void LogServerOutput(string line);
-
-    /// <summary>Logs the removal of a leftover server.</summary>
-    /// <param name="pid">The process ID.</param>
-    [LoggerMessage(Level = LogLevel.Warning, Message = "The engine stopped a llama-server from an earlier run, process {Pid}.")]
-    private partial void LogStoppedLeftover(int pid);
-
-    /// <summary>Logs why the leftover check found nothing to stop.</summary>
-    /// <param name="exception">The cause.</param>
-    [LoggerMessage(Level = LogLevel.Debug, Message = "The engine stopped no llama-server from an earlier run.")]
-    private partial void LogLeftoverCheckFailed(Exception exception);
-
-    /// <summary>Logs a PID file problem.</summary>
-    /// <param name="exception">The cause.</param>
-    /// <param name="pidFile">The PID file path.</param>
-    [LoggerMessage(Level = LogLevel.Warning, Message = "The engine could not update {PidFile}. If the engine is killed, you may have to stop its llama-server manually.")]
-    private partial void LogPidFileFailed(Exception exception, string pidFile);
 }

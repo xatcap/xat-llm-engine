@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using XatLlmEngine.Host.Contracts;
+using XatLlmEngine.Infrastructure.LlamaCpp;
 
 namespace XatLlmEngine.Host.Endpoints;
 
@@ -13,7 +14,7 @@ internal static class HealthResponseWriter
     /// <returns>A task that completes after the engine writes the body.</returns>
     public static Task WriteAsync(HttpContext context, HealthReport report)
     {
-        var local = report.Entries.TryGetValue("local", out var entry) ? entry.Description ?? "unknown" : "disabled";
+        var local = report.Entries.TryGetValue(LocalModelHealth.EntryName, out var entry) ? entry.Description ?? "unknown" : "disabled";
         var body = new HealthResponse(report.Status.ToString().ToLowerInvariant(), local, Describe(local));
         context.Response.ContentType = "application/json";
         return context.Response.WriteAsync(JsonSerializer.Serialize(body, HostJson.Default.HealthResponse), context.RequestAborted);

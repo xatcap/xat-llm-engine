@@ -87,6 +87,8 @@ Answers are text only. `tools` and `n` are not in any template, because the unif
 | 502 | The provider failed. |
 | 503 | One of these conditions applies: the local model is loading or missing, the provider has too much load, or the engine cannot reach the provider. See `Retry-After`. |
 
+When the provider sends its own `Retry-After` header, the engine uses that wait. The engine limits the wait to 30 seconds, rounds it up to whole seconds and sends at least 1 second. If the provider sends no header, or the engine returns the 503 itself, the value is 5 seconds.
+
 All errors use the body `{"error":{"message","type"}}`. There is one exception. A host name that `AllowedHosts` refuses gets ASP.NET's own HTML 400 response. The server also rejects malformed HTTP before the API runs.
 
 A stream that fails after it has started has already sent status 200. It ends with an `error` event and no `[DONE]` marker.

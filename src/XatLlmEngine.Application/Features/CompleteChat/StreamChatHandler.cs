@@ -33,10 +33,10 @@ public sealed class StreamChatHandler
             return Result<(IAsyncEnumerable<ChatChunk>, string)>.Fail(routed.Error);
         }
 
-        var chat = routed.Value!;
+        var chat = routed.Value;
         var stream = await chat.Provider.StreamAsync(chat.Request, cancellationToken).ConfigureAwait(false);
         return stream.IsSuccess
-            ? Result<(IAsyncEnumerable<ChatChunk>, string)>.Ok((stream.Value!, chat.Model.ToString()))
+            ? Result<(IAsyncEnumerable<ChatChunk>, string)>.Ok((stream.Value, chat.Model.ToString()))
             : Result<(IAsyncEnumerable<ChatChunk>, string)>.Fail(stream.Error);
     }
 }

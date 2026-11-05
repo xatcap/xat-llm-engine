@@ -45,6 +45,7 @@ internal static class ChatCompletionsEndpoint
                 body = node as JsonObject;
 
                 // The JSON parser checks JSON only at first use. Without this check, a problem causes a later 500 error, possibly after the provider call.
+                // ReadAll finds a repeated field name. ToJsonString finds a string that is not valid UTF-16, for example a lone "\ud83d".
                 ReadAll(body);
                 _ = body?.ToJsonString();
             }

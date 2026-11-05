@@ -22,7 +22,7 @@ internal sealed class ChatRouter(IEnumerable<IChatProvider> providers)
             return Result<RoutedChat>.Fail(model.Error);
         }
 
-        if (!providersByName.TryGetValue(model.Value!.Provider, out var provider))
+        if (!providersByName.TryGetValue(model.Value.Provider, out var provider))
         {
             return Result<RoutedChat>.Fail(new EngineError(
                 ErrorKind.NotFound,

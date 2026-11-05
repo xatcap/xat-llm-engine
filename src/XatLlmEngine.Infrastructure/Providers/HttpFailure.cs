@@ -1,11 +1,12 @@
 using System.Net;
 using System.Text.Json;
+using Microsoft.Extensions.Logging;
 using XatLlmEngine.Domain;
 
 namespace XatLlmEngine.Infrastructure.Providers;
 
 /// <summary>Translates failed provider responses into engine errors (anti-corruption layer).</summary>
-internal static class HttpFailure
+internal static partial class HttpFailure
 {
     /// <summary>Anthropic's non-standard status for "the API is temporarily overloaded".</summary>
     private const int Overloaded = 529;
@@ -17,28 +18,37 @@ internal static class HttpFailure
     /// </remarks>
     /// <param name="providerName">The provider's name, for the message.</param>
     /// <param name="response">The failed response.</param>
+    /// <param name="now">The current time, for a Retry-After header that holds a date.</param>
+    /// <param name="logger">The log. It gets the provider's name and the status, never the body.</param>
     /// <param name="cancellationToken">Cancels reading the response body.</param>
-    /// <returns>An error that is safe to show to the caller.</returns>
+    /// <returns>An error that is safe to show to the caller. For a temporary failure, it holds the provider's requested wait, if the provider sent one.</returns>
     public static async Task<EngineError> FromResponseAsync(
         string providerName,
         HttpResponseMessage response,
+        DateTimeOffset now,
+        ILogger logger,
         CancellationToken cancellationToken)
     {
         var status = (int)response.StatusCode;
-        return response.StatusCode switch
+        var error = response.StatusCode switch
         {
             HttpStatusCode.BadRequest or HttpStatusCode.RequestEntityTooLarge or HttpStatusCode.UnprocessableEntity =>
                 new EngineError(ErrorKind.InvalidRequest, await ReadMessageAsync(response, $"The provider '{providerName}' rejected the request.", cancellationToken).ConfigureAwait(false)),
             HttpStatusCode.NotFound =>
                 new EngineError(ErrorKind.NotFound, await ReadMessageAsync(response, $"The provider '{providerName}' does not have this model.", cancellationToken).ConfigureAwait(false)),
             HttpStatusCode.TooManyRequests =>
-                new EngineError(ErrorKind.RateLimited, $"The provider '{providerName}' applies a rate limit to requests."),
+                new EngineError(ErrorKind.RateLimited, $"The provider '{providerName}' applies a rate limit to requests.", DependencyInjection.RetryDelay(response, now)),
             HttpStatusCode.ServiceUnavailable or (HttpStatusCode)Overloaded =>
-                new EngineError(ErrorKind.Unavailable, $"The provider '{providerName}' is temporarily unavailable."),
+                new EngineError(ErrorKind.Unavailable, $"The provider '{providerName}' is temporarily unavailable.", DependencyInjection.RetryDelay(response, now)),
             HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden =>
                 new EngineError(ErrorKind.Upstream, $"The provider '{providerName}' rejected the engine's credentials. Check its configured API key."),
             _ => new EngineError(ErrorKind.Upstream, $"The provider '{providerName}' returned status {status}."),
         };
+
+        // The caller gets the message for an error that the caller can correct. Thus the log records that error at Debug level only.
+        var level = error.Kind is ErrorKind.InvalidRequest or ErrorKind.NotFound ? LogLevel.Debug : LogLevel.Warning;
+        LogFailedResponse(logger, level, providerName, status);
+        return error;
     }
 
     /// <summary>Builds the error for a provider that the engine could not reach, or that took too long.</summary>
@@ -76,4 +86,12 @@ internal static class HttpFailure
             return fallback;
         }
     }
+
+    /// <summary>Logs a failed provider response, so that an operator can find a bad API key or a provider that fails often.</summary>
+    /// <param name="logger">The log.</param>
+    /// <param name="level">The log level.</param>
+    /// <param name="providerName">The provider's name.</param>
+    /// <param name="status">The HTTP status.</param>
+    [LoggerMessage(Message = "The provider {ProviderName} returned status {Status}.")]
+    private static partial void LogFailedResponse(ILogger logger, LogLevel level, string providerName, int status);
 }

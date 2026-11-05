@@ -30,10 +30,10 @@ public sealed class CompleteChatHandler
             return Result<(ChatCompletion, string)>.Fail(routed.Error);
         }
 
-        var chat = routed.Value!;
+        var chat = routed.Value;
         var completion = await chat.Provider.CompleteAsync(chat.Request, cancellationToken).ConfigureAwait(false);
         return completion.IsSuccess
-            ? Result<(ChatCompletion, string)>.Ok((completion.Value!, chat.Model.ToString()))
+            ? Result<(ChatCompletion, string)>.Ok((completion.Value, chat.Model.ToString()))
             : Result<(ChatCompletion, string)>.Fail(completion.Error);
     }
 }

@@ -165,6 +165,27 @@ public class ApiTests
         Assert.Equal(retryAfter, response.Headers.RetryAfter is not null);
     }
 
+    /// <summary>The caller gets the wait that the provider asked for, in whole seconds rounded up, and at least 1 second. Without one, the engine uses its own default.</summary>
+    /// <param name="providerSeconds">The provider's requested wait in seconds, or a negative value for no request.</param>
+    /// <param name="expectedSeconds">The expected Retry-After value.</param>
+    /// <returns>A task for the test.</returns>
+    [Theory]
+    [InlineData(12.0, 12)]
+    [InlineData(2.2, 3)]
+    [InlineData(0.0, 1)]
+    [InlineData(-1.0, 5)]
+    public async Task Chat_RateLimited_ForwardsProviderRetryAfter(double providerSeconds, int expectedSeconds)
+    {
+        await using var engine = new EngineFactory();
+        var requested = providerSeconds < 0 ? (TimeSpan?)null : TimeSpan.FromSeconds(providerSeconds);
+        engine.Provider.Failure = new EngineError(ErrorKind.RateLimited, "Problem.", requested);
+
+        using var response = await PostAsync(engine, ValidBody);
+
+        Assert.Equal(HttpStatusCode.TooManyRequests, response.StatusCode);
+        Assert.Equal(TimeSpan.FromSeconds(expectedSeconds), response.Headers.RetryAfter?.Delta);
+    }
+
     /// <summary>An unexpected failure returns 500 in the OpenAI format, and never shows its internal details.</summary>
     /// <returns>A task for the test.</returns>
     [Fact]

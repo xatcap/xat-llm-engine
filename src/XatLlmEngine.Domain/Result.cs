@@ -9,6 +9,7 @@ namespace XatLlmEngine.Domain;
     "CA1000:Do not declare static members on generic types",
     Justification = "Result<T>.Ok and Result<T>.Fail are the factory pattern in docs/dotnet/csharp-best-practices.md.")]
 public sealed record Result<T>
+    where T : notnull
 {
     /// <summary>Initializes a new instance of the <see cref="Result{T}"/> class.</summary>
     /// <param name="value">The value on success.</param>
@@ -26,13 +27,19 @@ public sealed record Result<T>
     public EngineError? Error { get; }
 
     /// <summary>Gets a value indicating whether the operation succeeded.</summary>
+    [MemberNotNullWhen(true, nameof(Value))]
     [MemberNotNullWhen(false, nameof(Error))]
     public bool IsSuccess => Error is null;
 
     /// <summary>Creates a successful result.</summary>
-    /// <param name="value">The value produced by the operation.</param>
+    /// <param name="value">The value produced by the operation. It must not be <see langword="null"/>.</param>
     /// <returns>A successful result holding <paramref name="value"/>.</returns>
-    public static Result<T> Ok(T value) => new(value, null);
+    /// <exception cref="ArgumentNullException"><paramref name="value"/> is <see langword="null"/>.</exception>
+    public static Result<T> Ok(T value)
+    {
+        ArgumentNullException.ThrowIfNull(value);
+        return new(value, null);
+    }
 
     /// <summary>Creates a failed result.</summary>
     /// <param name="error">The reason for the failure.</param>

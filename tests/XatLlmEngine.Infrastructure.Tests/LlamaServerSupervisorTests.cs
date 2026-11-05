@@ -177,9 +177,9 @@ public sealed class LlamaServerSupervisorTests : IDisposable
     {
         var program = LlamaServerPaths.ServerProgram(Options());
         using var leftover = Process.Start(new ProcessStartInfo(program, ["--port", "0"]) { RedirectStandardOutput = true })!;
-        var pidFile = LlamaServerSupervisor.PidFilePath(program);
+        var pidFile = LlamaServerPidFile.PidFilePath(program);
         Directory.CreateDirectory(Path.GetDirectoryName(pidFile)!);
-        await File.WriteAllTextAsync(pidFile, LlamaServerSupervisor.FormatPidRecord(leftover), TestContext.Current.CancellationToken);
+        await File.WriteAllTextAsync(pidFile, LlamaServerPidFile.FormatPidRecord(leftover), TestContext.Current.CancellationToken);
         await Task.Delay(500, TestContext.Current.CancellationToken);
         Assert.False(leftover.HasExited, "The stand-in must be running, or this test proves nothing.");
 
@@ -205,10 +205,10 @@ public sealed class LlamaServerSupervisorTests : IDisposable
     public async Task Start_RecordedIdBelongsToOtherProgram_LeavesItRunning()
     {
         var program = LlamaServerPaths.ServerProgram(Options());
-        var pidFile = LlamaServerSupervisor.PidFilePath(program);
+        var pidFile = LlamaServerPidFile.PidFilePath(program);
         Directory.CreateDirectory(Path.GetDirectoryName(pidFile)!);
         using var self = Process.GetCurrentProcess();
-        await File.WriteAllTextAsync(pidFile, LlamaServerSupervisor.FormatPidRecord(self), TestContext.Current.CancellationToken);
+        await File.WriteAllTextAsync(pidFile, LlamaServerPidFile.FormatPidRecord(self), TestContext.Current.CancellationToken);
 
         var (supervisor, _, _) = Create();
         await supervisor.StartAsync(TestContext.Current.CancellationToken);
@@ -230,7 +230,7 @@ public sealed class LlamaServerSupervisorTests : IDisposable
     {
         var program = LlamaServerPaths.ServerProgram(Options());
         using var unrelated = Process.Start(new ProcessStartInfo(program, ["--port", "0"]) { RedirectStandardOutput = true })!;
-        var pidFile = LlamaServerSupervisor.PidFilePath(program);
+        var pidFile = LlamaServerPidFile.PidFilePath(program);
         Directory.CreateDirectory(Path.GetDirectoryName(pidFile)!);
         var oldStart = unrelated.StartTime.ToUniversalTime().AddHours(-1).Ticks;
         await File.WriteAllTextAsync(pidFile, $"{unrelated.Id} {oldStart}", TestContext.Current.CancellationToken);
@@ -315,7 +315,7 @@ public sealed class LlamaServerSupervisorTests : IDisposable
         var options = Options();
         var (supervisor, _) = Create(options);
         var http = new StubHttpHandler(System.Net.HttpStatusCode.OK, """{"choices":[{"message":{"content":"Hi"},"finish_reason":"stop"}]}""");
-        var provider = new LocalChatProvider(supervisor, new OpenAiClient("local", http, "test"), Microsoft.Extensions.Options.Options.Create(options));
+        var provider = new LocalChatProvider(supervisor, new OpenAiClient("local", http, "test", TimeProvider.System, NullLogger.Instance), Microsoft.Extensions.Options.Options.Create(options));
         await supervisor.StartAsync(TestContext.Current.CancellationToken);
         try
         {
@@ -398,7 +398,7 @@ public sealed class LlamaServerSupervisorTests : IDisposable
         var factory = services.BuildServiceProvider().GetRequiredService<IHttpClientFactory>();
         var wrapped = Microsoft.Extensions.Options.Options.Create(options);
         var supervisor = new LlamaServerSupervisor(wrapped, factory, TimeProvider.System, NullLogger<LlamaServerSupervisor>.Instance);
-        var client = new OpenAiClient("local", factory, DependencyInjection.LocalHttpClientName);
+        var client = new OpenAiClient("local", factory, DependencyInjection.LocalHttpClientName, TimeProvider.System, NullLogger.Instance);
         return (supervisor, new LocalChatProvider(supervisor, client, wrapped));
     }
 }

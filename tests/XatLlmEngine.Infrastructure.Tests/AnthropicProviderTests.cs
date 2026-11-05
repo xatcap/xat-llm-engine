@@ -1,5 +1,6 @@
 using System.Net;
 using System.Text.Json;
+using Microsoft.Extensions.Logging.Abstractions;
 using XatLlmEngine.Application.Abstractions;
 using XatLlmEngine.Domain;
 using XatLlmEngine.Infrastructure.Providers;
@@ -150,5 +151,7 @@ public class AnthropicProviderTests
         "anthropic",
         new ProviderOptions { Type = ProviderType.Anthropic, BaseUrl = new Uri("https://api.anthropic.test"), ApiKey = "secret", DefaultMaxTokens = 777 },
         http,
-        "test");
+        "test",
+        TimeProvider.System,
+        NullLogger<AnthropicChatProvider>.Instance);
 }

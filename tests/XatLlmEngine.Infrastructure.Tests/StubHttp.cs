@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json.Nodes;
 using XatLlmEngine.Application.Abstractions;
@@ -19,6 +20,9 @@ internal sealed class StubHttpHandler(HttpStatusCode status, string body) : Http
     /// <summary>Gets a failure to throw instead of responding, if any.</summary>
     public Exception? Throw { get; init; }
 
+    /// <summary>Gets the Retry-After delay to send, if any.</summary>
+    public TimeSpan? RetryAfter { get; init; }
+
     /// <inheritdoc/>
     public HttpClient CreateClient(string name) => new(this, disposeHandler: false);
 
@@ -32,7 +36,13 @@ internal sealed class StubHttpHandler(HttpStatusCode status, string body) : Http
 
         LastRequest = request;
         LastBody = request.Content is null ? null : await request.Content.ReadAsStringAsync(cancellationToken);
-        return new HttpResponseMessage(status) { Content = new StringContent(body, Encoding.UTF8) };
+        var response = new HttpResponseMessage(status) { Content = new StringContent(body, Encoding.UTF8) };
+        if (RetryAfter is { } delay)
+        {
+            response.Headers.RetryAfter = new RetryConditionHeaderValue(delay);
+        }
+
+        return response;
     }
 }
 

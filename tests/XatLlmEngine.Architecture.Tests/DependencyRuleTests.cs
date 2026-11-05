@@ -38,11 +38,11 @@ public class DependencyRuleTests
         Assert.True(result.IsSuccessful, Describe(result));
     }
 
-    /// <summary>Infrastructure does not depend on the host.</summary>
+    /// <summary>Infrastructure depends on neither the host nor the web framework. The adapters need only the Microsoft.Extensions abstractions.</summary>
     [Fact]
-    public void Infrastructure_DoesNotDependOnHost()
+    public void Infrastructure_DoesNotDependOnHostOrWebFramework()
     {
-        var result = Types.InAssembly(Infrastructure).ShouldNot().HaveDependencyOn("XatLlmEngine.Host").GetResult();
+        var result = Types.InAssembly(Infrastructure).ShouldNot().HaveDependencyOnAny("XatLlmEngine.Host", "Microsoft.AspNetCore").GetResult();
 
         Assert.True(result.IsSuccessful, Describe(result));
     }

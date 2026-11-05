@@ -1,5 +1,6 @@
 using System.Net;
 using System.Text.Json;
+using Microsoft.Extensions.Logging.Abstractions;
 using XatLlmEngine.Application.Abstractions;
 using XatLlmEngine.Domain;
 using XatLlmEngine.Infrastructure.Providers;
@@ -112,6 +113,32 @@ public class OpenAiCompatibleProviderTests
             .CompleteAsync(TestRequests.Minimal, TestContext.Current.CancellationToken);
 
         Assert.Equal(kind, result.Error!.Kind);
+    }
+
+    /// <summary>A temporary failure keeps the provider's requested wait, so that the engine can pass it to the caller.</summary>
+    /// <param name="status">The provider's status.</param>
+    /// <returns>A task for the test.</returns>
+    [Theory]
+    [InlineData(HttpStatusCode.TooManyRequests)]
+    [InlineData(HttpStatusCode.ServiceUnavailable)]
+    public async Task Complete_TemporaryFailureWithRetryAfter_KeepsDelay(HttpStatusCode status)
+    {
+        var http = new StubHttpHandler(status, "{}") { RetryAfter = TimeSpan.FromSeconds(12) };
+
+        var result = await Provider(http).CompleteAsync(TestRequests.Minimal, TestContext.Current.CancellationToken);
+
+        Assert.Equal(TimeSpan.FromSeconds(12), result.Error!.RetryAfter);
+    }
+
+    /// <summary>A temporary failure without a Retry-After header has no requested wait.</summary>
+    /// <returns>A task for the test.</returns>
+    [Fact]
+    public async Task Complete_TemporaryFailureWithoutRetryAfter_HasNoDelay()
+    {
+        var result = await Provider(new StubHttpHandler(HttpStatusCode.TooManyRequests, "{}"))
+            .CompleteAsync(TestRequests.Minimal, TestContext.Current.CancellationToken);
+
+        Assert.Null(result.Error!.RetryAfter);
     }
 
     /// <summary>A fixable problem shows the provider's explanation.</summary>
@@ -227,5 +254,5 @@ public class OpenAiCompatibleProviderTests
     private static OpenAiCompatibleChatProvider Provider(StubHttpHandler http) => new(
         "test",
         new ProviderOptions { BaseUrl = new Uri("https://api.example.com/v1/"), ApiKey = "secret" },
-        new OpenAiClient("test", http, "test"));
+        new OpenAiClient("test", http, "test", TimeProvider.System, NullLogger.Instance));
 }

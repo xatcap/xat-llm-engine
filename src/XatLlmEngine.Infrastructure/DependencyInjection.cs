@@ -1,7 +1,9 @@
 using System.ComponentModel.DataAnnotations;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Http.Resilience;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Polly;
 using XatLlmEngine.Application.Abstractions;
@@ -28,7 +30,8 @@ public static class DependencyInjection
     /// <exception cref="InvalidOperationException">A cloud provider's settings are invalid.</exception>
     public static IServiceCollection AddInfrastructure(this IServiceCollection services, IConfiguration configuration)
     {
-        services.TryAddTimeProvider();
+        // The host or a test can choose another clock before this call.
+        services.TryAddSingleton(TimeProvider.System);
         AddLocalModel(services, configuration);
 
         var providers = configuration.GetSection(ProviderOptions.SectionName).Get<Dictionary<string, ProviderOptions>>() ?? [];
@@ -42,16 +45,6 @@ public static class DependencyInjection
         }
 
         return services;
-    }
-
-    /// <summary>Adds the clock unless the host or a test has already chosen one.</summary>
-    /// <param name="services">The service collection to add to.</param>
-    private static void TryAddTimeProvider(this IServiceCollection services)
-    {
-        if (services.All(service => service.ServiceType != typeof(TimeProvider)))
-        {
-            services.AddSingleton(TimeProvider.System);
-        }
     }
 
     /// <summary>Adds the supervised llama-server, unless the settings turn off the local model.</summary>
@@ -72,9 +65,14 @@ public static class DependencyInjection
         services.AddHostedService(provider => provider.GetRequiredService<LlamaServerSupervisor>());
         services.AddSingleton<IChatProvider>(provider => new LocalChatProvider(
             provider.GetRequiredService<LlamaServerSupervisor>(),
-            new OpenAiClient(LocalChatProvider.ProviderName, provider.GetRequiredService<IHttpClientFactory>(), LocalHttpClientName),
+            new OpenAiClient(
+                LocalChatProvider.ProviderName,
+                provider.GetRequiredService<IHttpClientFactory>(),
+                LocalHttpClientName,
+                provider.GetRequiredService<TimeProvider>(),
+                provider.GetRequiredService<ILogger<OpenAiClient>>()),
             provider.GetRequiredService<IOptions<LlamaCppOptions>>()));
-        services.AddHealthChecks().AddCheck<LlamaServerHealthCheck>(LocalChatProvider.ProviderName);
+        services.AddHealthChecks().AddCheck<LlamaServerHealthCheck>(LocalModelHealth.EntryName);
     }
 
     /// <summary>Adds one cloud provider and its HTTP client.</summary>
@@ -86,8 +84,10 @@ public static class DependencyInjection
         var clientName = $"provider-{name}";
         services
             .AddHttpClient(clientName, client => client.Timeout = Timeout.InfiniteTimeSpan)
-            .AddResilienceHandler("upstream", pipeline =>
+            .AddResilienceHandler("upstream", (pipeline, context) =>
             {
+                var timeProvider = context.ServiceProvider.GetRequiredService<TimeProvider>();
+
                 // The limits cover waiting for a response to start. A stream that has started can run as long as it needs.
                 pipeline.AddTimeout(TimeSpan.FromSeconds(options.RequestTimeoutSeconds));
                 if (options.MaxRetries > 0)
@@ -98,7 +98,7 @@ public static class DependencyInjection
                         BackoffType = DelayBackoffType.Exponential,
                         UseJitter = true,
                         MaxDelay = MaximumRetryDelay,
-                        DelayGenerator = arguments => ValueTask.FromResult(RetryDelay(arguments.Outcome.Result, TimeProvider.System.GetUtcNow())),
+                        DelayGenerator = arguments => ValueTask.FromResult(RetryDelay(arguments.Outcome.Result, timeProvider.GetUtcNow())),
                     });
                 }
             });
@@ -106,9 +106,10 @@ public static class DependencyInjection
         services.AddSingleton<IChatProvider>(provider =>
         {
             var factory = provider.GetRequiredService<IHttpClientFactory>();
+            var timeProvider = provider.GetRequiredService<TimeProvider>();
             return options.Type == ProviderType.Anthropic
-                ? new AnthropicChatProvider(name, options, factory, clientName)
-                : new OpenAiCompatibleChatProvider(name, options, new OpenAiClient(name, factory, clientName));
+                ? new AnthropicChatProvider(name, options, factory, clientName, timeProvider, provider.GetRequiredService<ILogger<AnthropicChatProvider>>())
+                : new OpenAiCompatibleChatProvider(name, options, new OpenAiClient(name, factory, clientName, timeProvider, provider.GetRequiredService<ILogger<OpenAiClient>>()));
         });
     }
 

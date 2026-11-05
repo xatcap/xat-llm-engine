@@ -4,6 +4,7 @@ using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using Microsoft.Extensions.Logging;
 using Polly.Timeout;
 using XatLlmEngine.Application.Abstractions;
 using XatLlmEngine.Domain;
@@ -14,10 +15,14 @@ namespace XatLlmEngine.Infrastructure.Providers.OpenAiCompatible;
 /// <param name="providerName">The provider's name, for error messages.</param>
 /// <param name="httpClientFactory">Creates HTTP clients, so that the connection pool works correctly.</param>
 /// <param name="httpClientName">The named client, which carries the provider's resilience settings.</param>
+/// <param name="timeProvider">The clock, for a Retry-After header that holds a date.</param>
+/// <param name="logger">The log for failed responses.</param>
 internal sealed class OpenAiClient(
     string providerName,
     IHttpClientFactory httpClientFactory,
-    string httpClientName)
+    string httpClientName,
+    TimeProvider timeProvider,
+    ILogger logger)
 {
     /// <summary>The value a server sends as the last stream event.</summary>
     private const string StreamEnd = "[DONE]";
@@ -35,7 +40,7 @@ internal sealed class OpenAiClient(
             using var response = await SendAsync(baseUrl, apiKey, ToWire(request, stream: false), cancellationToken).ConfigureAwait(false);
             if (!response.IsSuccessStatusCode)
             {
-                return Result<ChatCompletion>.Fail(await HttpFailure.FromResponseAsync(providerName, response, cancellationToken).ConfigureAwait(false));
+                return Result<ChatCompletion>.Fail(await HttpFailure.FromResponseAsync(providerName, response, timeProvider.GetUtcNow(), logger, cancellationToken).ConfigureAwait(false));
             }
 
             var body = await response.Content
@@ -84,7 +89,7 @@ internal sealed class OpenAiClient(
         {
             using (response)
             {
-                return Result<IAsyncEnumerable<ChatChunk>>.Fail(await HttpFailure.FromResponseAsync(providerName, response, cancellationToken).ConfigureAwait(false));
+                return Result<IAsyncEnumerable<ChatChunk>>.Fail(await HttpFailure.FromResponseAsync(providerName, response, timeProvider.GetUtcNow(), logger, cancellationToken).ConfigureAwait(false));
             }
         }
 
