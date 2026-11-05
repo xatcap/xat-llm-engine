@@ -1,9 +1,10 @@
 # Engineering Guidelines
 
-- These pages describe how to write, structure, and review .NET code.
+- These pages describe how to write, structure, and review C# and .NET code.
 - For every architecture decision, confirm that the user understands and owns the whole architecture.
 - For every architecture decision, ALWAYS provide an explanation for the reasons of the decision and confirm with the user.
 - Significant decisions must be documented under an [ADR](./architecture-principles.md#architecture-decision-records-adrs).
+- Route the task to the below pages and read them before any code change.
 
 **Baseline:** .NET 10 (LTS) · C# 14 · SDK-style projects · nullable reference types enabled.
 

@@ -1,6 +1,10 @@
 # Flutter Engineering Guidelines
 
-These pages describe how to write, structure, and review Dart and Flutter code. They are a **shared baseline**, not a set of fixed laws. If a rule does not fit, you can use a different solution. Write the reason in the PR, or in an [ADR](../adr) for significant decisions. All text follows the [writing style](../writing-style.md).
+- These pages describe how to write, structure, and review Dart and Flutter code.
+- For every architecture decision, confirm that the user understands and owns the whole architecture.
+- For every architecture decision, ALWAYS provide an explanation for the reasons of the decision and confirm with the user.
+- Significant decisions must be documented under an [ADR](./architecture-principles.md#architecture-decision-records-adrs).
+- Route the task to the below pages and read them before any code change.
 
 **Baseline:** Flutter 3.44 (stable) · Dart 3.12 · sound null safety · Material 3 · `flutter_bloc` for state management.
 
