@@ -9,7 +9,7 @@ public static class DependencyInjection
 {
     /// <summary>Adds the use cases. They hold no per-request state, so they are singletons.</summary>
     /// <param name="services">The service collection to add to.</param>
-    /// <returns>The same collection, so calls can be chained.</returns>
+    /// <returns>The same collection, so that the caller can chain calls.</returns>
     public static IServiceCollection AddApplication(this IServiceCollection services)
     {
         services.AddSingleton<CompleteChatHandler>();

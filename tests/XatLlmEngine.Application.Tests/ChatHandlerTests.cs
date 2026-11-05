@@ -39,7 +39,7 @@ public class ChatHandlerTests
         Assert.True(result.IsSuccess);
     }
 
-    /// <summary>An unknown provider is reported as not found.</summary>
+    /// <summary>The handler reports an unknown provider as not found.</summary>
     /// <returns>A task for the test.</returns>
     [Fact]
     public async Task Complete_UnknownProvider_FailsAsNotFound()
@@ -64,7 +64,7 @@ public class ChatHandlerTests
         Assert.Equal(failure, result.Error);
     }
 
-    /// <summary>A field outside the provider's template is rejected by name, before the provider is called.</summary>
+    /// <summary>The handler rejects a field outside the provider's template by name, before it calls the provider.</summary>
     /// <returns>A task for the test.</returns>
     [Fact]
     public async Task Complete_FieldNotInTemplate_FailsAndNamesIt()
@@ -117,7 +117,7 @@ public class ChatHandlerTests
         Assert.True(result.IsSuccess);
     }
 
-    /// <summary>Every model is listed with its provider prefix, so it can be sent back as written.</summary>
+    /// <summary>The handler lists every model with its provider prefix, so that a caller can send the same text back.</summary>
     [Fact]
     public void ListModels_ProvidersWithModels_ListsWithPrefix()
     {

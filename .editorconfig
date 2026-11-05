@@ -14,7 +14,7 @@ indent_size = 4
 csharp_style_namespace_declarations = file_scoped:warning
 dotnet_sort_system_directives_first = true
 
-# Only the documentation rule from StyleCop is used: every member must be documented.
+# This project uses only the documentation rule from StyleCop: every member must have documentation.
 dotnet_analyzer_diagnostic.category-StyleCop.CSharp.AlternativeRules.severity = none
 dotnet_analyzer_diagnostic.category-StyleCop.CSharp.DocumentationRules.severity = none
 dotnet_analyzer_diagnostic.category-StyleCop.CSharp.LayoutRules.severity = none

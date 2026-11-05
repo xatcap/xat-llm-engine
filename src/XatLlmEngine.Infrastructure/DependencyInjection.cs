@@ -24,7 +24,7 @@ public static class DependencyInjection
     /// <summary>Adds the local model and every cloud provider that has an API key.</summary>
     /// <param name="services">The service collection to add to.</param>
     /// <param name="configuration">The application configuration.</param>
-    /// <returns>The same collection, so calls can be chained.</returns>
+    /// <returns>The same collection, so that the caller can chain calls.</returns>
     /// <exception cref="InvalidOperationException">A cloud provider's settings are invalid.</exception>
     public static IServiceCollection AddInfrastructure(this IServiceCollection services, IConfiguration configuration)
     {
@@ -54,7 +54,7 @@ public static class DependencyInjection
         }
     }
 
-    /// <summary>Adds the supervised llama-server unless the local model is switched off in settings.</summary>
+    /// <summary>Adds the supervised llama-server, unless the settings turn off the local model.</summary>
     /// <param name="services">The service collection to add to.</param>
     /// <param name="configuration">The application configuration.</param>
     private static void AddLocalModel(IServiceCollection services, IConfiguration configuration)
@@ -112,7 +112,7 @@ public static class DependencyInjection
         });
     }
 
-    /// <summary>Follows a provider's Retry-After header, up to the limit. MaxDelay alone does not limit it, so a provider could otherwise hold a caller's request for many minutes.</summary>
+    /// <summary>Obeys a provider's Retry-After header, up to the limit. MaxDelay does not limit this header, so without this limit a provider can hold a caller's request for many minutes.</summary>
     /// <param name="response">The response to retry, if there was one.</param>
     /// <param name="now">The current time, for a header that holds a date.</param>
     /// <returns>The delay to use, or <see langword="null"/> to use the normal backoff.</returns>
@@ -136,7 +136,7 @@ public static class DependencyInjection
     {
         if (string.Equals(name, LocalChatProvider.ProviderName, StringComparison.OrdinalIgnoreCase) || name.Contains('/', StringComparison.Ordinal))
         {
-            throw new InvalidOperationException($"'{name}' cannot be used as a provider name. The name '{LocalChatProvider.ProviderName}' is reserved, and names cannot contain '/'.");
+            throw new InvalidOperationException($"A provider cannot use the name '{name}'. The engine reserves the name '{LocalChatProvider.ProviderName}', and names cannot contain '/'.");
         }
 
         var results = new List<ValidationResult>();
@@ -150,7 +150,7 @@ public static class DependencyInjection
             throw new InvalidOperationException($"The BaseUrl of provider '{name}' must be an absolute address.");
         }
 
-        // A provider's API key travels with every request, so plain HTTP is allowed only when it stays on this machine.
+        // Every request includes the provider's API key, so the engine allows plain HTTP only on this machine.
         if (options.BaseUrl.Scheme != Uri.UriSchemeHttps && !(options.BaseUrl.Scheme == Uri.UriSchemeHttp && options.BaseUrl.IsLoopback))
         {
             throw new InvalidOperationException($"The BaseUrl of provider '{name}' must use https, or http on this machine only.");

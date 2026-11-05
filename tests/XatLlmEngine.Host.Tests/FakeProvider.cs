@@ -4,7 +4,7 @@ using XatLlmEngine.Domain;
 
 namespace XatLlmEngine.Host.Tests;
 
-/// <summary>A provider whose answers are chosen by each test.</summary>
+/// <summary>A provider that gives the answers that each test chooses.</summary>
 internal sealed class FakeProvider : IChatProvider
 {
     /// <inheritdoc/>

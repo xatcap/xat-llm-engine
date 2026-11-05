@@ -7,7 +7,7 @@ namespace XatLlmEngine.Infrastructure.Tests;
 /// <summary>Tests the rules for cloud provider settings and retries.</summary>
 public class ProviderSettingsTests
 {
-    /// <summary>Secure addresses, and plain addresses on this machine, are accepted.</summary>
+    /// <summary>The settings accept secure addresses, and plain addresses on this machine.</summary>
     /// <param name="address">The base address.</param>
     [Theory]
     [InlineData("https://api.example.com/v1")]
@@ -29,7 +29,7 @@ public class ProviderSettingsTests
             DependencyInjection.Validate("test", Options(address)));
     }
 
-    /// <summary>The reserved name cannot be taken, and a name with a slash could never be selected.</summary>
+    /// <summary>A provider cannot use the reserved name. A provider also cannot use a name with a slash, because no request can select it.</summary>
     /// <param name="name">The provider's name.</param>
     [Theory]
     [InlineData("local")]
@@ -61,7 +61,7 @@ public class ProviderSettingsTests
         Assert.Equal(TimeSpan.FromSeconds(30), DependencyInjection.RetryDelay(response, DateTimeOffset.UnixEpoch));
     }
 
-    /// <summary>A short wait is followed as asked.</summary>
+    /// <summary>The engine obeys a short wait, as the provider asked.</summary>
     [Fact]
     public void RetryDelay_ShortRetryAfter_IsFollowed()
     {

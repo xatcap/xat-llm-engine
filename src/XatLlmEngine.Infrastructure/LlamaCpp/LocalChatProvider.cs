@@ -49,7 +49,7 @@ internal sealed class LocalChatProvider(
             : client.StreamAsync(endpoint!.BaseUrl, endpoint.ApiKey, WithDefaults(request), cancellationToken);
     }
 
-    /// <summary>Checks that the request can be served. The model name is checked here because llama-server ignores it.</summary>
+    /// <summary>Checks that the engine can serve the request. This method checks the model name because llama-server ignores it.</summary>
     /// <param name="request">The validated request.</param>
     /// <param name="endpoint">The server's current address, if it is ready.</param>
     /// <returns>The problem, or <see langword="null"/> when the request can go ahead.</returns>

@@ -20,7 +20,7 @@ public sealed class StreamChatHandler
     /// <param name="command">The caller's request.</param>
     /// <param name="cancellationToken">Cancels generation, for example when the caller disconnects.</param>
     /// <returns>
-    /// The stream with its full model reference, or a failure that happened before any text was produced.
+    /// The stream with its full model reference, or a failure that occurred before the first text.
     /// Enumerating the stream can throw <see cref="ChatStreamException"/>.
     /// </returns>
     public async Task<Result<(IAsyncEnumerable<ChatChunk> Chunks, string Model)>> HandleAsync(

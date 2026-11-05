@@ -7,7 +7,7 @@ namespace XatLlmEngine.Application.Features.ListModels;
 public sealed class ListModelsHandler(IEnumerable<IChatProvider> providers)
 {
     /// <summary>Builds the model list.</summary>
-    /// <returns>Each model written as <c>provider/model</c>, in the order providers were configured.</returns>
+    /// <returns>Each model written as <c>provider/model</c>, in the order of the provider configuration.</returns>
     public IReadOnlyList<string> Handle() =>
         [.. providers.SelectMany(provider => provider.Models.Select(model => $"{provider.Name}/{model}"))];
 }

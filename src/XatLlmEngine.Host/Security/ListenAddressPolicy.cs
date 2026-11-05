@@ -6,7 +6,7 @@ namespace XatLlmEngine.Host.Security;
 /// <summary>Stops the engine from serving an unprotected API on the network.</summary>
 internal static class ListenAddressPolicy
 {
-    /// <summary>Refuses to start on any non-loopback address when no API key is configured. Anyone on the network could otherwise spend the cloud accounts' credit.</summary>
+    /// <summary>Refuses to start on a non-loopback address when the configuration has no API key. Without this rule, anyone on the network can spend the credit of the cloud accounts.</summary>
     /// <param name="configuration">The application configuration.</param>
     /// <exception cref="InvalidOperationException">The API would be open to the network.</exception>
     public static void EnsureAllowed(IConfiguration configuration)
@@ -21,7 +21,7 @@ internal static class ListenAddressPolicy
         if (exposed is not null)
         {
             throw new InvalidOperationException(
-                $"The engine is configured to listen on {exposed} without an API key. Set Engine:ApiKeys, or listen on 127.0.0.1 only.");
+                $"The configuration makes the engine listen on {exposed} without an API key. Set Engine:ApiKeys, or listen on 127.0.0.1 only.");
         }
     }
 

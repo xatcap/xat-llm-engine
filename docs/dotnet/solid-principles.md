@@ -1,6 +1,6 @@
 # SOLID Principles
 
-SOLID is five design principles for building code that is easy to change. They are **heuristics, not laws**: apply them when they reduce the cost of change, and stop when they only add indirection. Each section below says what over-applying the principle looks like.
+SOLID is five design principles that make code easy to change. They are **general guides, not laws**. Apply them when they reduce the cost of change. Stop when they only add indirection. Each section below shows what too much use of the principle looks like.
 
 ---
 
@@ -12,7 +12,7 @@ SOLID is five design principles for building code that is easy to change. They a
 - The class name contains "And", "Manager", "Processor", or "Helper", and the class does many unrelated things.
 - The class has many dependencies (more than about 5 constructor parameters), or more than a few hundred lines.
 - Unrelated changes (a protocol detail, a business rule, a log format) all touch the same file.
-- It is hard to test, because testing one behaviour requires setting up everything.
+- It is hard to test, because a test for one behaviour must set up everything.
 
 ```csharp
 // ❌ One class: transport, protocol parsing, business rules, persistence, and logging
@@ -48,7 +48,7 @@ public sealed class ProcessJobHandler(IDeviceClient device, IJobCounter counter,
 }
 ```
 
-**Over-applying it:** one-method classes everywhere, or splitting code that always changes together. *Cohesion* is the goal, not tiny classes.
+**Too much use:** one-method classes everywhere, or separate classes for code that always changes together. The goal is *cohesion*, not very small classes.
 
 ---
 
@@ -56,7 +56,7 @@ public sealed class ProcessJobHandler(IDeviceClient device, IJobCounter counter,
 
 > Software entities should be **open for extension** but **closed for modification**.
 
-You should be able to add a new variant (a new device model, a new export format) by **adding** code, not by editing a growing `if`/`switch` across the codebase.
+To add a new variant (a new device model, a new export format), **add** code. Do not edit a growing `if`/`switch` across the codebase.
 
 ```csharp
 // ❌ Every new model edits this method, and probably several others like it
@@ -93,7 +93,7 @@ public sealed class FeeCalculator(IEnumerable<IFeePolicy> policies)
 
 Common mechanisms: Strategy, Decorator, plug-ins resolved from DI, events, and pipeline behaviours.
 
-**Over-applying it:** building extension points "just in case". A single `switch` over a closed set of cases (for example, the values of an enum you own) is fine. Introduce the abstraction when the **second or third** variant actually arrives ([YAGNI](#yagni-you-arent-gonna-need-it)).
+**Too much use:** extension points that nothing needs yet. A single `switch` over a closed set of cases (for example, the values of an enum you own) is correct. Add the abstraction when the **second or third** variant is necessary ([YAGNI](#yagni-you-arent-gonna-need-it)).
 
 ---
 
@@ -106,7 +106,7 @@ A subtype must honour the base type's contract. It must not strengthen precondit
 **Symptoms of a violation**
 - Overrides that throw `NotImplementedException` or `NotSupportedException`.
 - Callers check the concrete type (`if (x is SpecialThing)`) before calling a base method.
-- A "mock" or "null" implementation silently returns success for operations that would fail on real hardware, so tests pass while production breaks.
+- A "mock" or "null" implementation silently returns success for operations that fail on real hardware. Thus, tests pass, but production fails.
 
 ```csharp
 // ❌ Read-only device pretends to be a full device
@@ -126,7 +126,7 @@ public sealed class MultiFunctionDevice : IScanner, IPrinter { /* ... */ }
 public sealed class FlatbedScanner : IScanner { /* ... */ }
 ```
 
-**Tip:** run the same **contract test suite** against every implementation of an interface, including fakes, to prove substitutability.
+**Tip:** run the same **contract test suite** against every implementation of an interface, including fakes. This proves that you can substitute them.
 
 ---
 
@@ -136,7 +136,7 @@ public sealed class FlatbedScanner : IScanner { /* ... */ }
 
 **Symptoms of a violation**
 - An interface has many members, and most callers use only two or three.
-- Implementations stub out half of the members.
+- Implementations leave half of the members empty.
 - A change to one member forces unrelated consumers to recompile or retest.
 
 ```csharp
@@ -164,7 +164,7 @@ public interface IOutputTray       { Task<TrayState> GetStateAsync(CancellationT
 
 One class can still implement several role interfaces. ISP is about **what consumers see**, not about how many classes you write.
 
-**Over-applying it:** one-method interfaces for everything, or interfaces with no consumer that needs the separation.
+**Too much use:** one-method interfaces for everything, or interfaces with no consumer that needs the separation.
 
 ---
 
@@ -172,7 +172,7 @@ One class can still implement several role interfaces. ISP is about **what consu
 
 > High-level modules should not depend on low-level modules; both should depend on **abstractions**. Abstractions should not depend on details.
 
-The **policy** (business/use-case logic) owns the interface, and the **detail** (database, serial port, HTTP, vendor SDK) implements it. This inverts the usual direction of source-code dependencies, and it is the foundation of [Clean Architecture](./clean-architecture.md#the-dependency-rule).
+The **policy** (business/use-case logic) owns the interface. The **detail** (database, serial port, HTTP, vendor SDK) implements it. This inverts the usual direction of source-code dependencies. It is the base of [Clean Architecture](./clean-architecture.md#the-dependency-rule).
 
 ```csharp
 // ❌ Use case depends on a concrete detail and creates it itself
@@ -202,25 +202,25 @@ internal sealed class VendorStamperAdapter(IOptions<StamperOptions> options) : I
 
 DIP (a design principle) is not the same as DI (a technique for supplying dependencies). For container mechanics, see [.NET › Dependency injection](./dotnet-best-practices.md#dependency-injection).
 
-**Over-applying it:** an interface for every class. Abstract **volatile** or **external** dependencies (I/O, hardware, time, randomness, third-party APIs) and the seams you need for testing. Stable, pure in-process code (value objects, pure functions) doesn't need an interface.
+**Too much use:** an interface for every class. Abstract **volatile** or **external** dependencies (I/O, hardware, time, randomness, third-party APIs) and the seams you need for testing. Stable, pure in-process code (value objects, pure functions) does not need an interface.
 
 ---
 
 ## Related principles
 
 ### DRY (Don't Repeat Yourself)
-Every piece of **knowledge** (a business rule, a protocol constant, a validation rule) should have a single authoritative representation.
+Each piece of **knowledge** (a business rule, a protocol constant, a validation rule) must have one authoritative representation.
 
-DRY is about knowledge, **not about code that happens to look the same**. Two similar snippets that change for different reasons should stay separate. Merging them couples unrelated concerns. The rule of thumb: tolerate duplication until the third occurrence, then extract.
+DRY is about knowledge, **not about code that looks the same by chance**. Keep two similar snippets separate if they change for different reasons. If you merge them, you couple unrelated concerns. A general rule: accept duplication until the third occurrence, then extract the code.
 
 ### KISS (Keep It Simple)
-Choose the simplest design that meets today's requirements. Clever code is expensive to read, debug, and hand over. Optimise for the reader.
+Choose the simplest design that meets the current requirements. Complex code costs much to read, debug, and give to another developer. Write for the reader.
 
 ### YAGNI (You Aren't Gonna Need It)
-Don't build features, configuration switches, or abstractions for hypothetical future needs. Speculative generality costs time now and complexity forever. Good structure (SRP, DIP) makes it cheap to add things *when* they are needed.
+Do not build features, configuration switches, or abstractions for possible future needs. They cost time now and add permanent complexity. Good structure (SRP, DIP) makes it cheap to add things *when* they become necessary.
 
 ### Composition over inheritance
-Build behaviour by combining small objects (Strategy, Decorator), not by deep class hierarchies. Inheritance couples a subclass to the parent's implementation details. Limit hierarchies to one or two levels, and prefer interfaces with `sealed` implementations.
+Build behaviour from small objects (Strategy, Decorator), not from deep class hierarchies. Inheritance couples a subclass to the parent's implementation details. Limit hierarchies to one or two levels, and prefer interfaces with `sealed` implementations.
 
 ```csharp
 // ✅ Add retry behaviour by decoration, not by subclassing
@@ -232,10 +232,10 @@ public sealed class RetryingStamper(IStamper inner, ResiliencePipeline pipeline)
 ```
 
 ### Law of Demeter (principle of least knowledge)
-A method should talk to its immediate collaborators, not reach through them: `order.Customer.Address.City.Name` couples you to four types. Ask the nearest object for what you need, or pass it in directly.
+A method must talk to its immediate collaborators, and not go through them. For example, `order.Customer.Address.City.Name` couples you to four types. Ask the nearest object for what you need, or pass it in directly.
 
 ### Tell, Don't Ask
-Tell objects what to do rather than querying their state and deciding for them. This keeps behaviour next to the data it guards.
+Tell objects what to do. Do not read their state and decide for them. This keeps behaviour next to the data that it protects.
 
 ```csharp
 // ❌ Ask
@@ -250,9 +250,9 @@ tray.Add(page); // Tray enforces its own capacity invariant and raises TrayFull
 ## Review checklist
 
 - [ ] Each class has one reason to change, and its name says what that is.
-- [ ] Adding a new variant means adding a class, not editing switches in several places.
+- [ ] A new variant needs a new class, and no edits to switches in several places.
 - [ ] Implementations honour their interface's contract: no `NotSupportedException` stubs and no type checks by callers.
 - [ ] Interfaces are small and shaped by their consumers.
 - [ ] Business logic depends on abstractions it owns, and I/O, hardware, time, and vendor SDKs sit behind them.
 - [ ] No speculative abstractions, and no interface without a reason (a volatile dependency or a test seam).
-- [ ] Duplication was removed only where it represents the same knowledge.
+- [ ] The change removes duplication only where it represents the same knowledge.

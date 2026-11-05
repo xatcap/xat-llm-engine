@@ -117,7 +117,7 @@ public sealed class LlamaServerSupervisorTests : IDisposable
         }
     }
 
-    /// <summary>A server that fails at startup does not stop the engine, and it keeps being retried.</summary>
+    /// <summary>A server that fails at startup does not stop the engine, and the engine continues to retry it.</summary>
     /// <returns>A task for the test.</returns>
     [Fact]
     public async Task Run_ServerFailsAtStartup_KeepsRetrying()
@@ -136,7 +136,7 @@ public sealed class LlamaServerSupervisorTests : IDisposable
         }
     }
 
-    /// <summary>Heavy output cannot block the server, which proves that its output is drained.</summary>
+    /// <summary>Much output cannot block the server, which proves that the engine reads all its output.</summary>
     /// <returns>A task for the test.</returns>
     [Fact]
     public async Task Start_ServerWritesHeavyOutput_StillBecomesReady()
@@ -170,7 +170,7 @@ public sealed class LlamaServerSupervisorTests : IDisposable
         await Assert.ThrowsAsync<HttpRequestException>(() => client.GetAsync(healthUrl, TestContext.Current.CancellationToken));
     }
 
-    /// <summary>A server left behind by a hard kill of the engine is stopped by the next start.</summary>
+    /// <summary>The next engine start stops a server that remains after the engine was killed.</summary>
     /// <returns>A task for the test.</returns>
     [Fact]
     public async Task Start_LeftoverServerRecorded_StopsIt()
@@ -199,7 +199,7 @@ public sealed class LlamaServerSupervisorTests : IDisposable
         }
     }
 
-    /// <summary>An ID that now belongs to another program must not be killed.</summary>
+    /// <summary>The engine must not kill an ID that now belongs to another program.</summary>
     /// <returns>A task for the test.</returns>
     [Fact]
     public async Task Start_RecordedIdBelongsToOtherProgram_LeavesItRunning()
@@ -250,7 +250,7 @@ public sealed class LlamaServerSupervisorTests : IDisposable
         }
     }
 
-    /// <summary>A running server that stops responding is replaced, because it would never exit by itself.</summary>
+    /// <summary>The engine replaces a running server that stops responding, because that server never exits by itself.</summary>
     /// <returns>A task for the test.</returns>
     [Fact]
     public async Task Run_ServerHangs_IsReplaced()

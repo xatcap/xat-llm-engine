@@ -83,7 +83,7 @@ public class OpenAiCompatibleProviderTests
         Assert.Equal("test/model-x", request.Body["model"]!.GetValue<string>());
     }
 
-    /// <summary>The answer, finish reason and token counts are converted.</summary>
+    /// <summary>The provider converts the answer, finish reason and token counts.</summary>
     /// <returns>A task for the test.</returns>
     [Fact]
     public async Task Complete_ValidResponse_ReturnsAnswer()
@@ -147,7 +147,7 @@ public class OpenAiCompatibleProviderTests
         Assert.Equal(ErrorKind.Upstream, result.Error!.Kind);
     }
 
-    /// <summary>A connection failure is reported as temporarily unavailable.</summary>
+    /// <summary>The provider reports a connection failure as temporarily unavailable.</summary>
     /// <returns>A task for the test.</returns>
     [Fact]
     public async Task Complete_ConnectionFails_FailsAsUnavailable()
@@ -159,7 +159,7 @@ public class OpenAiCompatibleProviderTests
         Assert.Equal(ErrorKind.Unavailable, result.Error!.Kind);
     }
 
-    /// <summary>Stream pieces are converted, in order, and empty pieces are skipped.</summary>
+    /// <summary>The provider converts stream pieces in order, and skips empty pieces.</summary>
     /// <returns>A task for the test.</returns>
     [Fact]
     public async Task Stream_ValidEvents_ReturnsChunks()
@@ -183,7 +183,7 @@ public class OpenAiCompatibleProviderTests
         Assert.True(body.RootElement.GetProperty("stream_options").GetProperty("include_usage").GetBoolean());
     }
 
-    /// <summary>Token counts are dropped when the caller did not ask for them, even if the server sends them.</summary>
+    /// <summary>The provider removes token counts when the caller did not ask for them, even if the server sends them.</summary>
     /// <returns>A task for the test.</returns>
     [Fact]
     public async Task Stream_UsageNotRequested_DropsUsage()
@@ -209,7 +209,7 @@ public class OpenAiCompatibleProviderTests
         Assert.Equal(ErrorKind.RateLimited, result.Error!.Kind);
     }
 
-    /// <summary>An error event after the stream starts is thrown, because a result can no longer be returned.</summary>
+    /// <summary>The provider throws an error event that comes after the stream starts, because it can no longer return a result.</summary>
     /// <returns>A task for the test.</returns>
     [Fact]
     public async Task Stream_ErrorEvent_Throws()

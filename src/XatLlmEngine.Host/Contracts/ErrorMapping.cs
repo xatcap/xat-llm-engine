@@ -73,7 +73,7 @@ internal static class ErrorMapping
 
     /// <summary>Writes the body of a response that ASP.NET ended with only a status, such as an unknown route.</summary>
     /// <param name="context">The current request.</param>
-    /// <returns>A task that completes when the body has been written.</returns>
+    /// <returns>A task that completes after the engine writes the body.</returns>
     public static Task WriteStatusAsync(HttpContext context)
     {
         var status = context.Response.StatusCode;
@@ -83,7 +83,7 @@ internal static class ErrorMapping
             StatusCodes.Status405MethodNotAllowed => Json("This route does not support this HTTP method.", InvalidRequestType, status),
             StatusCodes.Status415UnsupportedMediaType => UnsupportedMediaType(),
             >= StatusCodes.Status500InternalServerError => Json("The engine could not process the request.", InternalType, status),
-            _ => Json("The request could not be processed.", InvalidRequestType, status),
+            _ => Json("The engine cannot process this request.", InvalidRequestType, status),
         };
         return result.ExecuteAsync(context);
     }

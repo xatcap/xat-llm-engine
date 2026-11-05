@@ -1,6 +1,6 @@
 # C# Best Practices
 
-Language-level guidance for C# 14 on .NET 10. For platform concerns (DI, configuration, logging, packaging) see [.NET Best Practices](./dotnet-best-practices.md).
+This page gives language-level guidance for C# 14 on .NET 10. For platform concerns (DI, configuration, logging, packaging), see [.NET Best Practices](./dotnet-best-practices.md).
 
 ---
 
@@ -19,23 +19,23 @@ Language-level guidance for C# 14 on .NET 10. For platform concerns (DI, configu
   | Async method | suffix `Async` | `SaveAsync` |
 
 - Use names that describe intent: `RetryCount` over `rc`, `IsExpired` over `CheckFlag`.
-- Use domain vocabulary consistently. If the business calls it a *job*, don't call it a *task* in one place and a *work item* in another.
+- Use domain vocabulary consistently. If the business calls it a *job*, do not call it a *task* in one place and a *work item* in another.
 - Let `.editorconfig` enforce formatting and run `dotnet format` in CI.
 
-**Don't**
-- Use Hungarian notation (`strName`, `iCount`) or abbreviations that aren't universally known.
-- Use `#region` to hide large classes. If a class needs regions, it probably needs to be split.
-- Mix spaces and tabs or argue about brace style in reviews. The formatter decides.
+**Do not**
+- Use Hungarian notation (`strName`, `iCount`) or abbreviations that are not universally known.
+- Use `#region` to hide large classes. If a class needs regions, split the class.
+- Mix spaces and tabs, or discuss brace style in reviews. The formatter decides.
 
 ---
 
 ## Files, namespaces, and type design
 
 **Do**
-- Use **file-scoped namespaces** and put **one top-level type per file**, with the file named after the type.
+- Use **file-scoped namespaces**. Put **one top-level type in each file**, and give the file the name of the type.
 - Make namespaces match folder structure.
 - Make classes **`sealed` by default**. Unseal them only when inheritance is an intended extension point.
-- Use the **narrowest visibility** that works: `private` before `internal` before `public`. In libraries, everything that isn't part of the public contract should be `internal`.
+- Use the **narrowest visibility** that works: `private` before `internal` before `public`. In libraries, make everything `internal` if it is not part of the public contract.
 - Prefer **composition** over inheritance ([SOLID › Composition over inheritance](./solid-principles.md#composition-over-inheritance)).
 
 ```csharp
@@ -48,8 +48,8 @@ public sealed class InvoiceNumberGenerator(TimeProvider clock)
 }
 ```
 
-**Don't**
-- Create "Utils", "Helpers", or "Common" classes full of unrelated static methods. Give the behaviour a home on the type it concerns, or in a focused, well-named type.
+**Do not**
+- Create "Utils", "Helpers", or "Common" classes full of unrelated static methods. Put the behaviour on the type that it concerns, or in a small type with a clear name.
 - Expose public mutable fields.
 
 **Why:** Sealed, internal types are cheaper to change. Nobody outside can depend on them, and the JIT can devirtualise calls to them.
@@ -73,10 +73,10 @@ public void Register(Device device, string name)
 }
 ```
 
-- Use nullability attributes (`[NotNullWhen]`, `[MaybeNullWhen]`, `[MemberNotNull]`) so `Try*` patterns flow correctly.
+- Use nullability attributes (`[NotNullWhen]`, `[MaybeNullWhen]`, `[MemberNotNull]`), so that the compiler understands `Try*` patterns.
 
-**Don't**
-- Silence warnings with the null-forgiving operator `!` unless you can prove the value is non-null and the compiler can't. Leave a comment when you use it.
+**Do not**
+- Silence warnings with the null-forgiving operator `!`, unless you can prove that the value is non-null and the compiler cannot. Write a comment when you use it.
 - Return `null` for collections. Return an empty collection instead.
 
 ---
@@ -99,9 +99,9 @@ public sealed record DeviceSettings
 var fast = settings with { Timeout = TimeSpan.FromSeconds(1) };
 ```
 
-**Don't**
+**Do not**
 - Use records for entities with identity and lifecycle. Value equality is wrong for them.
-- Add behaviour-heavy logic to DTOs.
+- Add large amounts of behaviour to DTOs.
 
 ---
 
@@ -110,7 +110,7 @@ var fast = settings with { Timeout = TimeSpan.FromSeconds(1) };
 **Do**
 - Expose the **least capable** interface that callers need: `IReadOnlyList<T>`, `IReadOnlyCollection<T>`, `IEnumerable<T>`, or `IReadOnlyDictionary<TKey, TValue>`.
 - Use **collection expressions**: `int[] ids = [1, 2, 3];`, `List<string> names = [];`, `[..first, ..second]`.
-- Use `FrozenDictionary` / `FrozenSet` for lookup tables that are built once and read often.
+- Use `FrozenDictionary` / `FrozenSet` for lookup tables that you build once and read often.
 - Keep mutable collections private, and return read-only views.
 
 ```csharp
@@ -123,7 +123,7 @@ public sealed class Batch
 }
 ```
 
-**Don't**
+**Do not**
 - Expose `List<T>` publicly, or `ArrayList`/`Hashtable` (non-generic collections) anywhere.
 - Enumerate an `IEnumerable<T>` more than once without materialising it first.
 
@@ -131,7 +131,7 @@ public sealed class Batch
 
 ## Modern language features
 
-Use modern features when they make code **clearer**, not just because they are newer.
+Use modern features when they make code **clearer**. Do not use them only because they are newer.
 
 ### Pattern matching and switch expressions
 
@@ -149,7 +149,7 @@ public static string Describe(Status status) => status switch
 if (message is { Length: > 0 } text) Process(text);
 ```
 
-Prefer `is null` / `is not null` over `== null`, because they can't be overridden by operator overloads.
+Prefer `is null` / `is not null` over `== null`, because operator overloads cannot override them.
 
 ### Primary constructors
 
@@ -162,7 +162,7 @@ public sealed class ReportService(IReportStore store, ILogger<ReportService> log
 }
 ```
 
-**Don't:** use them when you need to validate or transform parameters, or when the parameter should be `readonly`. Primary-constructor parameters are mutable captures. If that matters, assign the parameter to a `private readonly` field.
+**Do not:** use them when you must validate or transform parameters, or when the parameter must be `readonly`. Primary-constructor parameters are mutable captures. If that matters, assign the parameter to a `private readonly` field.
 
 ### C# 14 features
 
@@ -176,7 +176,7 @@ public sealed class ReportService(IReportStore store, ILogger<ReportService> log
   }
   ```
 
-- **Extension members** (`extension` blocks): group extension methods **and extension properties** for one receiver type. Use them for genuinely general-purpose helpers, and don't use them to bolt domain logic onto types you own.
+- **Extension members** (`extension` blocks): group extension methods **and extension properties** for one receiver type. Use them for helpers that are really general purpose. Do not use them to add domain logic to types that you own.
 
   ```csharp
   public static class EnumerableExtensions
@@ -188,7 +188,7 @@ public sealed class ReportService(IReportStore store, ILogger<ReportService> log
   }
   ```
 
-- **Null-conditional assignment** (`order?.Status = Status.Closed;`): fine for optional objects, but don't use it to hide a null that should be an error.
+- **Null-conditional assignment** (`order?.Status = Status.Closed;`): correct for optional objects. Do not use it to hide a null that must be an error.
 
 ### Other features
 
@@ -206,7 +206,7 @@ public sealed class ReportService(IReportStore store, ILogger<ReportService> log
 - Model **expected** outcomes (validation failed, not found, device busy) as return values: `bool Try*(out T)`, a nullable result, or a `Result<T>` type.
 - Throw the **most specific** built-in exception that fits (`ArgumentException`, `InvalidOperationException`, `TimeoutException`, `NotSupportedException`). Create custom exception types only when callers need to catch them specifically.
 - Preserve the original exception: `throw;` (not `throw ex;`), or wrap it with an inner exception.
-- Catch exceptions only where you can **handle** them (retry, translate, or compensate) or at the outermost boundary (to log and fail gracefully).
+- Catch exceptions only where you can **handle** them (retry, translate, or compensate), or at the outermost boundary (to log the error and fail safely).
 
 ```csharp
 // ✅ Expected failure as a value
@@ -222,7 +222,7 @@ public sealed record Result<T>
 }
 ```
 
-Pair it with a non-generic `Result` (with `Result.Ok()` and `Result.Fail(error)`) for operations that return no value. Use one shared result type across the codebase; don't define a new one per module.
+Pair it with a non-generic `Result` (with `Result.Ok()` and `Result.Fail(error)`) for operations that return no value. Use one shared result type across the codebase. Do not define a new one for each module.
 
 ```csharp
 // ❌ Swallowing
@@ -238,7 +238,7 @@ catch (IOException ex)
 }
 ```
 
-**Don't**
+**Do not**
 - Use exceptions for control flow.
 - Catch `Exception` (or `catch {}`) except at a top-level boundary, and never without logging it.
 - Return error codes like `-1` or magic strings. Use types.
@@ -248,7 +248,7 @@ catch (IOException ex)
 ## Async/await
 
 **Do**
-- Go **async all the way**. When a method calls I/O, it should be `async` and return `Task`/`Task<T>`/`ValueTask<T>`.
+- Use **async at all levels**. When a method calls I/O, make it `async` and return `Task`/`Task<T>`/`ValueTask<T>`.
 - Accept a **`CancellationToken`** as the last parameter on every async method that does I/O or can take time, and pass it down.
 - Use `Task.WhenAll` for independent concurrent operations.
 - Use `await using` for `IAsyncDisposable` resources.
@@ -272,11 +272,11 @@ public async Task<Reading> ReadAsync(CancellationToken cancellationToken = defau
 }
 ```
 
-**Don't**
+**Do not**
 - Block on async code: `.Result`, `.Wait()`, `.GetAwaiter().GetResult()`. They cause deadlocks and thread-pool starvation.
 - Write `async void`, except for event handlers. Unhandled exceptions in `async void` crash the process.
-- Wrap synchronous code in `Task.Run` inside a library just to "make it async". Let the caller decide.
-- Fire-and-forget tasks without observing their exceptions. Use a hosted service or a channel instead.
+- Wrap synchronous code in `Task.Run` inside a library only to "make it async". Let the caller decide.
+- Start a task and ignore its exceptions. Use a hosted service or a channel instead.
 - Use `ValueTask` unless profiling shows a benefit, and never await a `ValueTask` twice.
 - Use `Thread.Sleep` in async code. Use `await Task.Delay(..., ct)`, or a `PeriodicTimer` for loops.
 
@@ -304,10 +304,10 @@ public sealed class Connection : IAsyncDisposable
 ```
 
 - Use `ObjectDisposedException.ThrowIf(_disposed, this);` in members that must not run after disposal.
-- Wrap unmanaged handles in `SafeHandle`. Don't write finalizers yourself ([.NET › Native interop](./dotnet-best-practices.md#native-interop)).
+- Wrap unmanaged handles in `SafeHandle`. Do not write finalizers yourself ([.NET › Native interop](./dotnet-best-practices.md#native-interop)).
 
-**Don't**
-- Dispose objects you didn't create (for example, injected dependencies). The owner disposes.
+**Do not**
+- Dispose objects you did not create (for example, injected dependencies). The owner disposes.
 - Rely on the garbage collector to release ports, files, sockets, or handles.
 
 ---
@@ -316,10 +316,10 @@ public sealed class Connection : IAsyncDisposable
 
 **Do**
 - Use LINQ for clarity on collections. Keep queries short, and name intermediate results when a chain gets long.
-- Materialise once (`ToList()`, `ToArray()`) when results are enumerated more than once.
+- Materialise once (`ToList()`, `ToArray()`) when you enumerate results more than once.
 - Prefer `Any()` over `Count() > 0`, and `TryGetNonEnumeratedCount` when it is relevant.
 
-**Don't**
+**Do not**
 - Put side effects inside `Select`/`Where`.
 - Use LINQ in measured hot paths where allocations matter. Use a plain loop there.
 
@@ -334,8 +334,8 @@ public sealed class Connection : IAsyncDisposable
 - Use `static` lambdas when no state needs capturing, to avoid closure allocations.
 - Use source-generated `Regex` (`[GeneratedRegex]`) and `System.Text.Json` source generation in performance-sensitive code.
 
-**Don't**
-- Sacrifice readability for micro-optimisations that nobody measured.
+**Do not**
+- Make code harder to read for small optimisations that nobody measured.
 - Concatenate strings in loops.
 
 ---
@@ -347,7 +347,8 @@ public sealed class Connection : IAsyncDisposable
 - Make missing docs fail the build. `<GenerateDocumentationFile>true</GenerateDocumentationFile>` with warning `CS1591` covers public members only. For internal and private members, add StyleCop.Analyzers rule `SA1600` and set `documentInternalElements` and `documentPrivateElements` to `true` in `stylecop.json`.
 - Make doc comments describe **business logic**: the business purpose, the rules the member enforces, valid ranges and units, the business meaning of the return value, the exceptions it throws, and its thread-safety.
 - Where a design applies a SOLID principle, name the principle and the reason in the type's `<remarks>` ([SOLID](./solid-principles.md)).
-- Use inline comments (`//`) only to explain business logic that the code cannot express on its own, such as a business rule or a device constraint.
+- Use inline comments (`//`) only to explain business logic that the code cannot show on its own, such as a business rule or a device constraint.
+- Write all comments in the [writing style](../writing-style.md) of this repository.
 
 ```csharp
 /// <summary>Moves the stamp head to the given offset from the top edge of the page.</summary>
@@ -359,24 +360,24 @@ public sealed class Connection : IAsyncDisposable
 public Task MoveToAsync(int offsetMm, CancellationToken cancellationToken = default);
 ```
 
-**Don't**
+**Do not**
 - Write doc or inline comments that restate what the code already says through its structure and naming (`i++; // increment i`, `/// <summary>Gets the name.</summary>`).
 - Write inline comments that explain a language construct or a mechanical step.
-- Leave commented-out code. Git remembers it.
+- Leave commented-out code. Git keeps the history.
 - Leave `TODO`, `FIXME`, or any other placeholder comment. Finish the work instead.
-- Write forward-looking statements ("for now", "will be improved later"). A comment describes the code as it is.
+- Write statements about future work ("for now", "will be improved later"). A comment describes the code as it is.
 
 ---
 
 ## Review checklist
 
-- [ ] Names reveal intent; the formatter and analyzers pass with no new suppressions.
-- [ ] Types are `sealed`/`internal` unless there is a reason not to be.
-- [ ] There are no nullable warnings, and `!` is used only where justified.
-- [ ] DTOs and value objects are immutable records; collections are exposed as read-only interfaces.
-- [ ] Exceptions are specific, never swallowed, and rethrown with `throw;`. Expected failures are values.
-- [ ] Async all the way: no `.Result`/`.Wait()`/`async void`, and every I/O method takes a `CancellationToken`.
-- [ ] Every created disposable is disposed, and nothing disposes what it doesn't own.
-- [ ] Performance changes are backed by measurements.
+- [ ] Names show the intent. The formatter and analyzers pass with no new suppressions.
+- [ ] Types are `sealed`/`internal`, unless there is a reason to use a different visibility.
+- [ ] There are no nullable warnings, and the code uses `!` only with a reason.
+- [ ] DTOs and value objects are immutable records. Collections are visible only as read-only interfaces.
+- [ ] Exceptions are specific. No code ignores them, and code rethrows them with `throw;`. Expected failures are values.
+- [ ] Async at all levels: no `.Result`/`.Wait()`/`async void`, and every I/O method takes a `CancellationToken`.
+- [ ] Code disposes every disposable that it creates, and it does not dispose objects that it does not own.
+- [ ] Measurements support all performance changes.
 - [ ] Every class and every function has XML docs that describe business logic, and inline comments explain business logic only.
-- [ ] There are no `TODO` or placeholder comments, no commented-out code, and no forward-looking statements.
+- [ ] There are no `TODO` or placeholder comments, no commented-out code, and no statements about future work.

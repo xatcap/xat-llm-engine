@@ -2,7 +2,7 @@ using Microsoft.Extensions.Diagnostics.HealthChecks;
 
 namespace XatLlmEngine.Infrastructure.LlamaCpp;
 
-/// <summary>Reports the local model's stage. Anything other than ready is degraded, not unhealthy, because cloud providers keep working.</summary>
+/// <summary>Reports the local model's stage. All stages other than ready are degraded, not unhealthy, because cloud providers continue to work.</summary>
 /// <param name="supervisor">Reports the stage.</param>
 internal sealed class LlamaServerHealthCheck(LlamaServerSupervisor supervisor) : IHealthCheck
 {

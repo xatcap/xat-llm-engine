@@ -6,10 +6,10 @@ using XatLlmEngine.Host.Contracts;
 
 namespace XatLlmEngine.Host.Security;
 
-/// <summary>Requires a valid <c>Authorization: Bearer</c> key on the API, when keys are configured.</summary>
+/// <summary>Requires a valid <c>Authorization: Bearer</c> key on the API, when the configuration has keys.</summary>
 /// <remarks>
-/// Keys are compared as SHA-256 hashes in constant time, so response timing reveals neither their content nor their
-/// length. When no keys are configured, <see cref="ListenAddressPolicy"/> guarantees that the API is on loopback only.
+/// This filter compares keys as SHA-256 hashes in constant time, so response timing does not show their content or their
+/// length. When the configuration has no keys, <see cref="ListenAddressPolicy"/> guarantees that the API is on loopback only.
 /// </remarks>
 internal sealed class ApiKeyEndpointFilter : IEndpointFilter
 {

@@ -10,7 +10,7 @@ using XatLlmEngine.Host.Endpoints;
 using XatLlmEngine.Host.Security;
 using XatLlmEngine.Infrastructure;
 
-// The content root is the engine's folder, because the current folder depends on how the engine was started.
+// The content root is the engine's folder, because the current folder depends on how the engine started.
 var builder = WebApplication.CreateBuilder(new WebApplicationOptions
 {
     Args = args,

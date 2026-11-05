@@ -1,6 +1,6 @@
 # Flutter Architecture
 
-How we split a Flutter app into layers and packages so it stays **changeable, testable, and understandable** as it grows, and so several teams can work on it at once. General principles (coupling and cohesion, dependency direction, ADRs) are in [.NET › Architecture Principles](../dotnet/architecture-principles.md) and apply here too. How blocs themselves are written is in [BLoC Best Practices](./bloc-best-practices.md).
+This page shows how we split a Flutter app into layers and packages. The app then stays **changeable, testable, and understandable** as it grows. Several teams can also work on it at the same time. [.NET › Architecture Principles](../dotnet/architecture-principles.md) contains general principles (coupling and cohesion, dependency direction, ADRs), which also apply here. [BLoC Best Practices](./bloc-best-practices.md) shows how to write blocs.
 
 ---
 
@@ -9,9 +9,9 @@ How we split a Flutter app into layers and packages so it stays **changeable, te
 | Goal | What it looks like in a Flutter app |
 |------|-------------------------------------|
 | **Separation of concerns** | Widgets draw; blocs decide; repositories fetch. Each kind of code has one home. |
-| **Testability** | Business logic is tested without a device, a network, or widgets. Screens are tested with fake blocs. |
+| **Testability** | Tests of business logic need no device, network, or widgets. Tests of screens use fake blocs. |
 | **Changeability** | Swapping the backend, a plugin, or a storage engine touches only the data layer. Redesigning a screen touches only widgets. |
-| **Team scalability** | Features live in separate packages with clear owners and can be built and run on their own. |
+| **Team scalability** | Features are in separate packages with clear owners. Each feature can build and run on its own. |
 | **Enforced boundaries** | Illegal dependencies fail the build, not the code review. |
 
 ---
@@ -28,14 +28,18 @@ Every piece of code in the app answers exactly one of these questions:
 | *Where does the data come from?* | **Repository** | Repository interfaces and implementations | No |
 | *How do we talk to the outside world?* | **Data source** | API clients, DTOs, database, plugins wrappers | No (except plugin wrappers) |
 
-The first four rows are the thesis's four-layer architecture (UI, BLoC, repository, data; see [BLoC › Sources](./bloc-best-practices.md#sources)) with an optional domain layer added. The table also matches the Flutter team's own [architecture guide](https://docs.flutter.dev/app-architecture): their *view* is our widget, their *view model* is our bloc, and their *repositories* and *services* are our repositories and data sources.
+The first four rows are the thesis's four-layer architecture (UI, BLoC, repository, data; see [BLoC › Sources](./bloc-best-practices.md#sources)) with an optional domain layer added. The table also matches the [architecture guide](https://docs.flutter.dev/app-architecture) of the Flutter team. These terms are equivalent:
+
+- Their *view* is our widget.
+- Their *view model* is our bloc.
+- Their *repositories* and *services* are our repositories and data sources.
 
 **Do**
 - Keep widgets **"as stupid as possible"** (Soares): they render state and forward user input as events, nothing more.
 - Put every state change in a bloc. Put every external call in a data source behind a repository.
 - Keep transport details (HTTP status codes, JSON keys, SQL, method channel names) inside the data layer.
 
-**Don't**
+**Do not**
 - Call an API client or a plugin from a widget or a bloc directly.
 - Let DTOs (`DishDto`, `Map<String, dynamic>`) cross into blocs or widgets. Repositories map them to domain models.
 
@@ -87,7 +91,7 @@ This is the [dependency inversion principle](../dotnet/solid-principles.md#depen
 
 Add a domain layer **only** when it earns its place:
 
-- A rule is used by **several blocs** (for example "a booking needs at least one guest and must be in the future").
+- **Several blocs** use a rule (for example "a booking needs at least one guest and must be in the future").
 - An operation **combines several repositories** (place an order = validate the booking token + submit the order + clear the basket).
 - The domain has real business rules worth testing on their own.
 
@@ -105,7 +109,7 @@ class PlaceOrder { // not final: blocs' tests need to mock it
 }
 ```
 
-**Don't** add a use case class that only forwards one call to one repository. That's ceremony without benefit; let the bloc call the repository.
+**Do not** add a use case class that only forwards one call to one repository. That is ceremony without benefit; let the bloc call the repository.
 
 ### Repository
 
@@ -124,7 +128,7 @@ class PlaceOrder { // not final: blocs' tests need to mock it
 
 | Kind of state | Example | Where | Lifetime |
 |---------------|---------|-------|----------|
-| **Ephemeral UI state** | Animation progress, current text in a field before it's submitted, which tile is expanded | `State` object, `ValueNotifier`, controllers | The widget |
+| **Ephemeral UI state** | Animation progress, current text in a field before the user submits it, the tile that is open | `State` object, `ValueNotifier`, controllers | The widget |
 | **Feature state** | Search results, the booking form, the dish list | Bloc provided at the feature's page | The feature's route |
 | **App state** | Signed-in user, settings, locale, the current order | Bloc above `MaterialApp`, backed by a repository | The app session |
 | **Persisted state** | Cached menu, saved drafts, auth token | Repository → database / secure storage | Across launches |
@@ -132,9 +136,9 @@ class PlaceOrder { // not final: blocs' tests need to mock it
 **Do**
 - Pick the **smallest scope** that works, and provide blocs at the lowest common ancestor of the widgets that need them.
 - Keep app-wide data in **repositories**, and let small app-level blocs or each feature's own blocs subscribe to it.
-- Restore important state after the app is killed in the background, either through the repository or `hydrated_bloc` for blocs whose state should survive restarts.
+- Restore important state after the operating system kills the app in the background. Use the repository, or `hydrated_bloc` for blocs whose state must survive restarts.
 
-**Don't**
+**Do not**
 - Keep the same data both in `setState` and in a bloc. One source of truth per piece of data.
 - Make every bloc global "to be safe". Global blocs never close and keep data from the last screen around.
 
@@ -146,25 +150,30 @@ Features should not know about each other's internals. When one feature needs to
 
 | Need | Mechanism |
 |------|-----------|
-| Shared data (the current order is changed by the menu, shown by the order page) | A **repository stream** both features subscribe to |
+| Shared data (the menu changes the current order, and the order page shows it) | A **repository stream** both features subscribe to |
 | One feature opens another (menu → booking) | **Navigation** by route, owned by the shell ([Navigation](#navigation-across-features)) |
 | One screen links two of its own blocs | A **`BlocListener`** in that screen ([BLoC › Communication between blocs](./bloc-best-practices.md#communication-between-blocs)) |
 | An app-wide event (signed out, locale changed) | An **app-level bloc or repository stream** that features listen to |
 
-**Don't** import one feature's bloc into another feature.
+**Do not** import one feature's bloc into another feature.
 
 ---
 
 ## Feature modules ("micro frontends")
 
-In web development, *micro frontends* split one frontend into independently built parts, each owned by one team. Flutter can't load separately deployed code into a running mobile app (app stores require the code to ship in the binary), so in Flutter the idea becomes **feature modules**: each feature is its own **package** in a monorepo, owned by one team, with its own UI, blocs, and tests, composed into one app by a thin **shell**.
+In web development, *micro frontends* split one frontend into independently built parts, each owned by one team. Flutter cannot load separately deployed code into a running mobile app, because app stores require the code in the binary. Thus, in Flutter the idea becomes **feature modules**:
 
-The thesis's interview with Angelov is the strongest argument for this: his **number one tip** for large Flutter apps was to *modularize as much as possible*, and "it is not as difficult as people think". BMW's app was split so that each feature could, in theory, run as its own app. The thesis itself only extracted form validation into a package, and listed full modularization as future work.
+- Each feature is its own **package** in a monorepo.
+- One team owns each package.
+- Each package has its own UI, blocs, and tests.
+- A thin **shell** composes the packages into one app.
+
+The interview with Angelov in the thesis is the strongest argument for this. Angelov's **number one tip** for large Flutter apps was to *modularize as much as possible*, and "it is not as difficult as people think". BMW split its app so that each feature could, in theory, run as its own app. The thesis only moved form validation into a package, and listed full modularization as future work.
 
 ### Why
 
 - **Ownership:** one team, one package, clear code owners.
-- **Smaller blast radius:** a change in `booking` can't break `menu` because `menu` can't import it.
+- **Smaller blast radius:** a change in `booking` cannot break `menu` because `menu` cannot import it.
 - **Faster work:** each feature has a sandbox app that starts in seconds, and CI tests only the packages that changed.
 - **Enforced architecture:** package dependencies make illegal imports impossible, instead of relying on reviews.
 
@@ -278,7 +287,7 @@ abstract final class MenuRoutes {
 }
 ```
 
-The feature asks for what it needs from the outside (`onDishOrdered`, repositories through `context.read`) instead of reaching for it. The shell provides it. (This is why `MenuPage` takes a callback here, while the single-package version in [BLoC › Providing blocs](./bloc-best-practices.md#providing-blocs) doesn't need one.)
+The feature asks for what it needs from the outside (`onDishOrdered`, repositories through `context.read`) instead of reaching for it. The shell provides it. (This is why `MenuPage` takes a callback here, while the single-package version in [BLoC › Providing blocs](./bloc-best-practices.md#providing-blocs) does not need one.)
 
 ### Running a feature on its own
 
@@ -286,10 +295,10 @@ Each feature has an `example/` app that provides **fake repositories** and opens
 
 ### When not to split
 
-The thesis pointed out the cost (section 4.8.3): splitting every feature into a package duplicated model classes between packages and made the reference app harder to follow. Avoid that by putting shared models in repository or domain packages, not in features. And don't split before you need to:
+The thesis identified the cost (section 4.8.3). When every feature had its own package, packages duplicated model classes and the reference app was harder to follow. To avoid this, put shared models in repository or domain packages, not in features. Also, do not split before this is necessary:
 
 - **One team, small app:** feature folders in one package ([BLoC › Structuring the application](./bloc-best-practices.md#structuring-the-application)), with data access already in packages.
-- **Several teams, or a feature that's reused in another app:** feature packages.
+- **Several teams, or a feature that another app reuses:** feature packages.
 
 Because the folder structure is feature-first from the start, moving a folder into a package later is mechanical.
 
@@ -297,13 +306,13 @@ Because the folder structure is feature-first from the start, moving a folder in
 
 - **No independent deployment.** All features ship together in one binary. Release trains, feature flags, and remote config are how teams ship independently in practice.
 - **Deferred components** (Android) and **deferred imports** (web) reduce download size; they are not independent releases.
-- If you truly need UI that changes without an app release, use **server-driven UI** for specific screens, and accept that those screens are limited to what the app's widget catalogue can render.
+- If you really need UI that changes without an app release, use **server-driven UI** for specific screens. Those screens can show only what the widget catalogue of the app can render.
 
 ---
 
 ## Composition root
 
-The composition root is the one place that knows every concrete class. In a Flutter app that's `main_<flavor>.dart` → `bootstrap()` → `App`.
+The composition root is the one place that knows every concrete class. In a Flutter app that is `main_<flavor>.dart` → `bootstrap()` → `App`.
 
 **Do**
 - Read configuration (`--dart-define-from-file`), create API clients and repositories, choose real or fake implementations per flavor, and provide them with `MultiRepositoryProvider` ([BLoC › Dependency injection](./bloc-best-practices.md#dependency-injection)).
@@ -322,7 +331,7 @@ Future<void> main() async {
 }
 ```
 
-**Don't**
+**Do not**
 - Create dependencies anywhere else, or reach for a global locator inside features.
 
 ---
@@ -374,10 +383,10 @@ Unexpected errors (bugs) are not translated. They go to `Bloc.observer.onError` 
 ## Enforcing boundaries
 
 **Do**
-- Use **package dependencies** as the main guard. If `feature_menu`'s `pubspec.yaml` doesn't list `feature_order`, importing it is a compile error.
-- Keep repositories, API clients, and `core` as **pure Dart packages** (no `flutter` dependency). That guarantees they contain no UI code and can be tested with `dart test`.
+- Use **package dependencies** as the main guard. If `feature_menu`'s `pubspec.yaml` does not list `feature_order`, importing it is a compile error.
+- Keep repositories, API clients, and `core` as **pure Dart packages** (no `flutter` dependency). This guarantees that they contain no UI code, and that `dart test` can test them.
 - Inside a package, keep everything under `src/` and export only the public API. The `implementation_imports` lint stops other packages from reaching into `src/`.
-- Add a CI check that fails when a package depends on something its type may not (for example a script over each `pubspec.yaml`, or a custom lint rule with `custom_lint`).
+- Add a CI check that fails when a package has a dependency that its type does not allow. For example, use a script over each `pubspec.yaml`, or a custom lint rule with `custom_lint`.
 - Record significant architecture decisions as [ADRs](../adr).
 
 ---
@@ -405,7 +414,7 @@ Not every app needs every layer or package.
 | App | Reasonable shape |
 |-----|------------------|
 | Prototype or tiny tool | One package; cubits; repositories as plain classes. Keep widgets free of I/O anyway. |
-| Single-team product | One app package with feature folders; repositories and API client in pure Dart packages. No domain layer until rules are shared. |
+| Single-team product | One app package with feature folders; repositories and API client in pure Dart packages. No domain layer until several parts share rules. |
 | Multi-team or long-lived product | Full feature-module monorepo as described above. |
 
 Start with the smallest shape that keeps the [dependency rule](#the-dependency-rule). The rule is what makes it cheap to grow into the next shape later.
@@ -429,11 +438,11 @@ Start with the smallest shape that keeps the [dependency rule](#the-dependency-r
 
 - [ ] Widgets contain no business rules or I/O; blocs contain no Flutter imports.
 - [ ] Blocs depend on repository interfaces, not implementations or API clients.
-- [ ] DTOs and transport errors don't leave the data layer.
+- [ ] DTOs and transport errors do not leave the data layer.
 - [ ] State lives at the smallest scope that works; one source of truth per piece of data.
 - [ ] No feature imports another feature; cross-feature flows go through the shell or a repository.
 - [ ] Feature packages export only their routes / entry point.
 - [ ] Repository, API client, and `core` packages are pure Dart.
-- [ ] Concrete classes are created only in the composition root.
-- [ ] Errors are translated at each layer boundary; unexpected errors reach the crash reporter.
-- [ ] A domain/use-case layer exists only where rules are shared or combine repositories.
+- [ ] Only the composition root creates concrete classes.
+- [ ] Each layer boundary translates errors. Unexpected errors go to the crash reporter.
+- [ ] A domain/use-case layer exists only where several parts share rules, or rules combine repositories.

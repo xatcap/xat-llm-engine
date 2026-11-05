@@ -28,7 +28,7 @@ public sealed record ModelReference
         {
             return Result<ModelReference>.Fail(new EngineError(
                 ErrorKind.InvalidRequest,
-                "The model must be written as 'provider/model', for example 'local/ministral-3-3b'."));
+                "Write the model as 'provider/model', for example 'local/ministral-3-3b'."));
         }
 
         return Result<ModelReference>.Ok(new ModelReference(value[..separator], value[(separator + 1)..]));

@@ -52,7 +52,7 @@ internal sealed record ChatCompletionChunkResponse(
 /// <summary>The change in one stream piece.</summary>
 /// <param name="Index">The answer's position, which is always 0.</param>
 /// <param name="Delta">The new text.</param>
-/// <param name="FinishReason">Why generation stopped. It is written as an explicit null until then, because clients expect the field.</param>
+/// <param name="FinishReason">Why generation stopped. Until then, the engine writes an explicit null, because clients expect the field.</param>
 internal sealed record ChatCompletionChunkChoice(
     int Index,
     ChatCompletionMessage Delta,

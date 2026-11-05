@@ -10,7 +10,7 @@ internal sealed class ApiDocumentTransformer : IOpenApiDocumentTransformer
     /// <summary>The name of the security scheme inside the document.</summary>
     private const string SchemeName = "Bearer";
 
-    /// <summary>Describes the chat request body. The example is what Swagger UI fills in for "Try it out", so it must be a request the API accepts.</summary>
+    /// <summary>Describes the chat request body. Swagger UI puts the example into "Try it out", so the example must be a request that the API accepts.</summary>
     /// <param name="document">The generated document.</param>
     private static void DescribeChatRequest(OpenApiDocument document)
     {
@@ -37,7 +37,7 @@ internal sealed class ApiDocumentTransformer : IOpenApiDocumentTransformer
         {
             Type = SecuritySchemeType.Http,
             Scheme = "bearer",
-            Description = "A key from Engine:ApiKeys. It is not needed when no keys are configured.",
+            Description = "A key from Engine:ApiKeys. You do not need a key when the configuration has no keys.",
         };
 
         var requirement = new OpenApiSecurityRequirement { [new OpenApiSecuritySchemeReference(SchemeName, document)] = [] };
