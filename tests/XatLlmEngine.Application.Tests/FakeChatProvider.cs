@@ -1,4 +1,3 @@
-using System.Text.Json.Nodes;
 using XatLlmEngine.Application.Abstractions;
 using XatLlmEngine.Domain;
 
@@ -16,33 +15,6 @@ internal sealed class FakeChatProvider(string name) : IChatProvider
 
     /// <inheritdoc/>
     public IReadOnlyList<string> RequestFields { get; init; } = ["messages"];
-
-    /// <inheritdoc/>
-    public string? InitialSystemPrompt { get; init; }
-
-    /// <inheritdoc/>
-    public int MaxSystemPromptLength { get; init; } = 10_000;
-
-    /// <summary>Gets the failure to return when the router applies the system prompt, if any.</summary>
-    public EngineError? SystemPromptFailure { get; init; }
-
-    /// <inheritdoc/>
-    public Result<JsonObject> ApplySystemPrompt(JsonObject body, string? prompt)
-    {
-        if (SystemPromptFailure is not null)
-        {
-            return Result<JsonObject>.Fail(SystemPromptFailure);
-        }
-
-        if (prompt is null)
-        {
-            return Result<JsonObject>.Ok(body);
-        }
-
-        var result = body.DeepClone().AsObject();
-        result["stored_prompt"] = prompt;
-        return Result<JsonObject>.Ok(result);
-    }
 
     /// <summary>Gets the most recent request.</summary>
     public ChatRequest? LastRequest { get; private set; }

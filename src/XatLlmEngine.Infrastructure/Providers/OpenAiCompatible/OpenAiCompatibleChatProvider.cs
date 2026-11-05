@@ -1,4 +1,3 @@
-using System.Text.Json.Nodes;
 using XatLlmEngine.Application.Abstractions;
 using XatLlmEngine.Domain;
 
@@ -18,15 +17,6 @@ internal sealed class OpenAiCompatibleChatProvider(string name, ProviderOptions 
 
     /// <inheritdoc/>
     public IReadOnlyList<string> RequestFields => options.RequestFields;
-
-    /// <inheritdoc/>
-    public string? InitialSystemPrompt => options.SystemPrompt;
-
-    /// <inheritdoc/>
-    public int MaxSystemPromptLength => options.MaxSystemPromptLength;
-
-    /// <inheritdoc/>
-    public Result<JsonObject> ApplySystemPrompt(JsonObject body, string? prompt) => OpenAiClient.ApplySystemPrompt(body, prompt);
 
     /// <inheritdoc/>
     public Task<Result<ChatCompletion>> CompleteAsync(ChatRequest request, CancellationToken cancellationToken) =>

@@ -1,5 +1,4 @@
 using XatLlmEngine.Application.Abstractions;
-using XatLlmEngine.Application.Features.SystemPrompts;
 using XatLlmEngine.Domain;
 
 namespace XatLlmEngine.Application.Features.CompleteChat;
@@ -12,10 +11,9 @@ public sealed class StreamChatHandler
 
     /// <summary>Initializes a new instance of the <see cref="StreamChatHandler"/> class.</summary>
     /// <param name="providers">Every provider enabled in this deployment.</param>
-    /// <param name="systemPrompts">The stored system prompts.</param>
-    public StreamChatHandler(IEnumerable<IChatProvider> providers, SystemPromptStore systemPrompts)
+    public StreamChatHandler(IEnumerable<IChatProvider> providers)
     {
-        router = new ChatRouter(providers, systemPrompts);
+        router = new ChatRouter(providers);
     }
 
     /// <summary>Validates the command and starts the stream.</summary>

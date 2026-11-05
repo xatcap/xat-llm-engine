@@ -57,20 +57,6 @@ api.MapPost("/chat/completions", ChatCompletionsEndpoint.HandleAsync)
     .Produces<ErrorResponse>(StatusCodes.Status503ServiceUnavailable);
 api.MapGet("/models", ModelsEndpoint.Handle)
     .Produces<ModelListResponse>();
-api.MapPut("/system-prompts/{provider}", SystemPromptEndpoint.ReplaceAsync)
-    .WithDescription("Replaces the provider's system prompt until the next restart. An empty prompt clears it. A stored prompt replaces the default in a model's chat template.")
-    .Accepts<SystemPromptRequest>("application/json")
-    .Produces<SystemPromptResponse>()
-    .Produces<ErrorResponse>(StatusCodes.Status400BadRequest)
-    .Produces<ErrorResponse>(StatusCodes.Status404NotFound)
-    .Produces<ErrorResponse>(StatusCodes.Status415UnsupportedMediaType);
-api.MapPost("/system-prompts/{provider}/append", SystemPromptEndpoint.AppendAsync)
-    .WithDescription("Adds text to the end of the provider's stored system prompt until the next restart. A newline separates the text from any existing prompt. With no stored prompt, the text becomes the whole prompt.")
-    .Accepts<SystemPromptRequest>("application/json")
-    .Produces<SystemPromptResponse>()
-    .Produces<ErrorResponse>(StatusCodes.Status400BadRequest)
-    .Produces<ErrorResponse>(StatusCodes.Status404NotFound)
-    .Produces<ErrorResponse>(StatusCodes.Status415UnsupportedMediaType);
 app.MapHealthChecks("/health", new HealthCheckOptions { ResponseWriter = HealthResponseWriter.WriteAsync });
 
 // The API documentation is for debugging only. A release package runs as Production, so it does not expose these routes.

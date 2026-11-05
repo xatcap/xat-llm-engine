@@ -22,27 +22,6 @@ internal sealed class OpenAiClient(
     /// <summary>The value a server sends as the last stream event.</summary>
     private const string StreamEnd = "[DONE]";
 
-    /// <summary>Checks a request and adds the stored prompt as the first message, because model chat templates read it only from there.</summary>
-    /// <param name="body">The caller's JSON. This method does not change it.</param>
-    /// <param name="prompt">The stored prompt, or <see langword="null"/> when the provider has none.</param>
-    /// <returns>The body to send, or an invalid-request failure.</returns>
-    public static Result<JsonObject> ApplySystemPrompt(JsonObject body, string? prompt)
-    {
-        if (SystemPromptRules.FindProblem(body) is { } problem)
-        {
-            return Result<JsonObject>.Fail(problem);
-        }
-
-        if (prompt is null)
-        {
-            return Result<JsonObject>.Ok(body);
-        }
-
-        var result = body.DeepClone().AsObject();
-        result["messages"]!.AsArray().Insert(0, new JsonObject { ["role"] = "system", ["content"] = prompt });
-        return Result<JsonObject>.Ok(result);
-    }
-
     /// <summary>Generates a complete answer.</summary>
     /// <param name="baseUrl">The server's base address, including any version path.</param>
     /// <param name="apiKey">The key for this server.</param>

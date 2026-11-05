@@ -28,15 +28,6 @@ internal sealed class LocalChatProvider(
     public IReadOnlyList<string> RequestFields => options.Value.RequestFields;
 
     /// <inheritdoc/>
-    public string? InitialSystemPrompt => options.Value.SystemPrompt;
-
-    /// <inheritdoc/>
-    public int MaxSystemPromptLength => options.Value.MaxSystemPromptLength;
-
-    /// <inheritdoc/>
-    public Result<JsonObject> ApplySystemPrompt(JsonObject body, string? prompt) => OpenAiClient.ApplySystemPrompt(body, prompt);
-
-    /// <inheritdoc/>
     public Task<Result<ChatCompletion>> CompleteAsync(ChatRequest request, CancellationToken cancellationToken)
     {
         // One reading of the endpoint, because a crash can clear it at any moment.

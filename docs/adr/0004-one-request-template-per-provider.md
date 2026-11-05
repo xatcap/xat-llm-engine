@@ -1,6 +1,6 @@
 # 0004. Give each provider its own request template
 
-- Status: Partly replaced by [ADR 0005](0005-stored-system-prompts.md)
+- Status: Accepted
 - Date: 2026-11-05
 - Deciders: Project maintainer
 

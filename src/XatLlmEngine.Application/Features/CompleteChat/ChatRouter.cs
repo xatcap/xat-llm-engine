@@ -1,13 +1,11 @@
 using XatLlmEngine.Application.Abstractions;
-using XatLlmEngine.Application.Features.SystemPrompts;
 using XatLlmEngine.Domain;
 
 namespace XatLlmEngine.Application.Features.CompleteChat;
 
 /// <summary>Selects the provider named by the model prefix, and checks the request against that provider's template.</summary>
 /// <param name="providers">Every provider enabled in this deployment.</param>
-/// <param name="systemPrompts">The stored system prompts.</param>
-internal sealed class ChatRouter(IEnumerable<IChatProvider> providers, SystemPromptStore systemPrompts)
+internal sealed class ChatRouter(IEnumerable<IChatProvider> providers)
 {
     /// <summary>The enabled providers by name. Names ignore case, because configuration keys do too.</summary>
     private readonly Dictionary<string, IChatProvider> providersByName =
@@ -31,12 +29,6 @@ internal sealed class ChatRouter(IEnumerable<IChatProvider> providers, SystemPro
                 $"The provider '{model.Value.Provider}' is not available. Check its name, and check that the configuration has its API key."));
         }
 
-        var body = provider.ApplySystemPrompt(command.Body, systemPrompts.Get(provider.Name));
-        if (!body.IsSuccess)
-        {
-            return Result<RoutedChat>.Fail(body.Error);
-        }
-
         var unsupported = command.Body.Select(field => field.Key).FirstOrDefault(name => !IsAccepted(provider, name));
         if (unsupported is not null)
         {
@@ -45,7 +37,7 @@ internal sealed class ChatRouter(IEnumerable<IChatProvider> providers, SystemPro
                 $"The provider '{provider.Name}' does not support the field '{unsupported}'. Supported fields: model, stream, {string.Join(", ", provider.RequestFields)}."));
         }
 
-        return Result<RoutedChat>.Ok(new RoutedChat(provider, new ChatRequest(model.Value.Model, body.Value!), model.Value));
+        return Result<RoutedChat>.Ok(new RoutedChat(provider, new ChatRequest(model.Value.Model, command.Body), model.Value));
     }
 
     /// <summary>Tells whether a provider accepts a field. Every provider accepts <c>model</c> and <c>stream</c>, because the engine needs them to route the request.</summary>

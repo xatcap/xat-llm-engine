@@ -22,6 +22,7 @@ This project does not check text against the ASD-STE100 approved-word dictionary
 12. Use a vertical list for 3 or more items.
 13. Put a warning before the step that it applies to.
 14. Do not change technical names, such as identifiers, flags, environment variables, products and field names.
+15. Never use m-dashes.
 
 If a rule makes a sentence harder to read, make the sentence easy to read. For example, write "check" and not "do a check of".
 
@@ -34,4 +35,3 @@ If a rule makes a sentence harder to read, make the sentence easy to read. For e
 | start | Make a program or a task begin. | launch, spin up, boot |
 | stop | Make a program or a task end. | shut down, terminate. Use "kill" only for the operating system action. |
 | caller | A program that sends requests to the engine. | client, for the program that uses the API |
-| engine | This program, `XatLlmEngine.Host`. | server, for this program |

@@ -1,6 +1,9 @@
 # Engineering Guidelines
 
-These pages describe how to write, structure, and review .NET code. They are a **shared baseline**, not a set of fixed laws. If a rule does not fit, you can use a different solution. Write the reason in the PR, or in an [ADR](./architecture-principles.md#architecture-decision-records-adrs) for significant decisions. All text follows the [writing style](../writing-style.md).
+- These pages describe how to write, structure, and review .NET code.
+- For every architecture decision, confirm that the user understands and owns the whole architecture.
+- For every architecture decision, ALWAYS provide an explanation for the reasons of the decision and confirm with the user.
+- Significant decisions must be documented under an [ADR](./architecture-principles.md#architecture-decision-records-adrs).
 
 **Baseline:** .NET 10 (LTS) · C# 14 · SDK-style projects · nullable reference types enabled.
 

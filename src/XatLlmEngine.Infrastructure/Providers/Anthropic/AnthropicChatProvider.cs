@@ -35,30 +35,6 @@ internal sealed class AnthropicChatProvider(
     public IReadOnlyList<string> RequestFields => options.RequestFields;
 
     /// <inheritdoc/>
-    public string? InitialSystemPrompt => options.SystemPrompt;
-
-    /// <inheritdoc/>
-    public int MaxSystemPromptLength => options.MaxSystemPromptLength;
-
-    /// <inheritdoc/>
-    public Result<JsonObject> ApplySystemPrompt(JsonObject body, string? prompt)
-    {
-        if (SystemPromptRules.FindProblem(body) is { } problem)
-        {
-            return Result<JsonObject>.Fail(problem);
-        }
-
-        if (prompt is null)
-        {
-            return Result<JsonObject>.Ok(body);
-        }
-
-        var result = body.DeepClone().AsObject();
-        result["system"] = prompt;
-        return Result<JsonObject>.Ok(result);
-    }
-
-    /// <inheritdoc/>
     public async Task<Result<ChatCompletion>> CompleteAsync(ChatRequest request, CancellationToken cancellationToken)
     {
         try

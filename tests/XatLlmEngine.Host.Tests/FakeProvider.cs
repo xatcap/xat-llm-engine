@@ -1,5 +1,4 @@
 using System.Runtime.CompilerServices;
-using System.Text.Json.Nodes;
 using XatLlmEngine.Application.Abstractions;
 using XatLlmEngine.Domain;
 
@@ -16,22 +15,6 @@ internal sealed class FakeProvider : IChatProvider
 
     /// <inheritdoc/>
     public IReadOnlyList<string> RequestFields { get; } = ["messages", "temperature", "stream_options"];
-
-    /// <inheritdoc/>
-    public string? InitialSystemPrompt => null;
-
-    /// <inheritdoc/>
-    public int MaxSystemPromptLength => 40;
-
-    /// <summary>Gets the stored prompt of the most recent request.</summary>
-    public string? LastSystemPrompt { get; private set; }
-
-    /// <inheritdoc/>
-    public Result<JsonObject> ApplySystemPrompt(JsonObject body, string? prompt)
-    {
-        LastSystemPrompt = prompt;
-        return Result<JsonObject>.Ok(body);
-    }
 
     /// <summary>Gets or sets the chunks to stream.</summary>
     public IReadOnlyList<ChatChunk> Chunks { get; set; } = [];
