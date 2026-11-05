@@ -1,6 +1,8 @@
 using System.Net;
 using System.Text;
 using System.Text.Json;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.Extensions.Configuration;
 using XatLlmEngine.Application.Abstractions;
 using XatLlmEngine.Domain;
 
@@ -42,7 +44,7 @@ public class ApiTests
         await using var engine = new EngineFactory();
         const string Body = """
             {"model":"fake/model-a","temperature":0.5,
-             "messages":[{"role":"developer","content":"Be brief."},
+             "messages":[{"role":"assistant","content":"Be brief."},
                          {"role":"user","content":[{"type":"image_url","image_url":{"url":"x"}}]}]}
             """;
 
@@ -52,7 +54,7 @@ public class ApiTests
         var request = engine.Provider.LastRequest!;
         Assert.Equal("model-a", request.Model);
         Assert.Equal(0.5, request.Body["temperature"]!.GetValue<double>());
-        Assert.Equal("developer", request.Body["messages"]![0]!["role"]!.GetValue<string>());
+        Assert.Equal("assistant", request.Body["messages"]![0]!["role"]!.GetValue<string>());
         Assert.Equal("x", request.Body["messages"]![1]!["content"]![0]!["image_url"]!["url"]!.GetValue<string>());
     }
 
@@ -432,6 +434,156 @@ public class ApiTests
         using var client = engine.CreateClient();
         using var content = new StringContent(body, Encoding.UTF8, "application/json");
         return await client.PostAsync(new Uri("/v1/chat/completions", UriKind.Relative), content, TestContext.Current.CancellationToken);
+    }
+
+    /// <summary>Replace returns the full prompt, and later chat requests carry it, with and without streaming.</summary>
+    /// <returns>A task for the test.</returns>
+    [Fact]
+    public async Task SystemPrompt_Replace_ReachesChatRequests()
+    {
+        await using var engine = new EngineFactory();
+        engine.Provider.Chunks = [new ChatChunk("Hi", FinishReason.Stop, null)];
+
+        using var replaced = await SendPromptAsync(engine, HttpMethod.Put, "/v1/system-prompts/fake", """{"prompt":"Be brief."}""");
+        Assert.Equal(HttpStatusCode.OK, replaced.StatusCode);
+        using var body = await ReadJsonAsync(replaced);
+        Assert.Equal("fake", body.RootElement.GetProperty("provider").GetString());
+        Assert.Equal("Be brief.", body.RootElement.GetProperty("prompt").GetString());
+
+        using var complete = await PostAsync(engine, ValidBody);
+        Assert.Equal(HttpStatusCode.OK, complete.StatusCode);
+        Assert.Equal("Be brief.", engine.Provider.LastRequest!.SystemPrompt);
+
+        using var cleared = await SendPromptAsync(engine, HttpMethod.Put, "/v1/system-prompts/fake", """{"prompt":""}""");
+        Assert.Equal(HttpStatusCode.OK, cleared.StatusCode);
+        using var noPrompt = await PostAsync(engine, ValidBody);
+        Assert.Null(engine.Provider.LastRequest!.SystemPrompt);
+
+        using var again = await SendPromptAsync(engine, HttpMethod.Put, "/v1/system-prompts/fake", """{"prompt":"Be kind."}""");
+        using var stream = await PostAsync(engine, """{"model":"fake/model-a","stream":true,"messages":[{"role":"user","content":"Hi"}]}""");
+        Assert.Equal(HttpStatusCode.OK, stream.StatusCode);
+        Assert.Equal("Be kind.", engine.Provider.LastRequest!.SystemPrompt);
+    }
+
+    /// <summary>Append adds to the stored prompt, and a newline separates the parts.</summary>
+    /// <returns>A task for the test.</returns>
+    [Fact]
+    public async Task SystemPrompt_Append_AddsToEnd()
+    {
+        await using var engine = new EngineFactory();
+
+        using var first = await SendPromptAsync(engine, HttpMethod.Post, "/v1/system-prompts/fake/append", """{"prompt":"One."}""");
+        using var second = await SendPromptAsync(engine, HttpMethod.Post, "/v1/system-prompts/fake/append", """{"prompt":"Two."}""");
+
+        using var firstBody = await ReadJsonAsync(first);
+        using var secondBody = await ReadJsonAsync(second);
+        Assert.Equal("One.", firstBody.RootElement.GetProperty("prompt").GetString());
+        Assert.Equal("One.\nTwo.", secondBody.RootElement.GetProperty("prompt").GetString());
+    }
+
+    /// <summary>A prompt in the configuration is the starting value, and the local provider exposes it.</summary>
+    /// <returns>A task for the test.</returns>
+    [Fact]
+    public async Task SystemPrompt_Configured_IsStartValue()
+    {
+        await using var engine = new EngineFactory();
+        await using var configured = engine.WithWebHostBuilder(builder => builder.ConfigureAppConfiguration((_, configuration) =>
+            configuration.AddInMemoryCollection(new Dictionary<string, string?> { ["LocalModel:SystemPrompt"] = "Configured." })));
+        using var client = configured.CreateClient();
+        using var content = new StringContent("""{"prompt":"Added."}""", Encoding.UTF8, "application/json");
+
+        using var response = await client.PostAsync(new Uri("/v1/system-prompts/local/append", UriKind.Relative), content, TestContext.Current.CancellationToken);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using var body = await ReadJsonAsync(response);
+        Assert.Equal("Configured.\nAdded.", body.RootElement.GetProperty("prompt").GetString());
+    }
+
+    /// <summary>An unknown provider returns 404 from both routes.</summary>
+    /// <param name="route">The route.</param>
+    /// <param name="method">The HTTP method.</param>
+    /// <returns>A task for the test.</returns>
+    [Theory]
+    [InlineData("/v1/system-prompts/nobody", "PUT")]
+    [InlineData("/v1/system-prompts/nobody/append", "POST")]
+    public async Task SystemPrompt_UnknownProvider_Returns404(string route, string method)
+    {
+        await using var engine = new EngineFactory();
+
+        using var response = await SendPromptAsync(engine, new HttpMethod(method), route, """{"prompt":"x"}""");
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        await AssertErrorFormatAsync(response, "not_found_error");
+    }
+
+    /// <summary>A bad body returns 400 and leaves the prompt unchanged.</summary>
+    /// <param name="body">The request body.</param>
+    /// <returns>A task for the test.</returns>
+    [Theory]
+    [InlineData("{")]
+    [InlineData("")]
+    [InlineData("null")]
+    [InlineData("[]")]
+    [InlineData("{}")]
+    [InlineData("""{"prompt":null}""")]
+    [InlineData("""{"prompt":5}""")]
+    public async Task SystemPrompt_BadBody_Returns400(string body)
+    {
+        await using var engine = new EngineFactory();
+
+        using var response = await SendPromptAsync(engine, HttpMethod.Put, "/v1/system-prompts/fake", body);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        await AssertErrorFormatAsync(response, "invalid_request_error");
+        using var chat = await PostAsync(engine, ValidBody);
+        Assert.Null(engine.Provider.LastRequest!.SystemPrompt);
+    }
+
+    /// <summary>A body that is not JSON returns 415, because browsers can send such a body from any site.</summary>
+    /// <returns>A task for the test.</returns>
+    [Fact]
+    public async Task SystemPrompt_NotJson_Returns415()
+    {
+        await using var engine = new EngineFactory();
+        using var client = engine.CreateClient();
+        using var request = new HttpRequestMessage(HttpMethod.Put, "/v1/system-prompts/fake")
+        {
+            Content = new StringContent("""{"prompt":"x"}""", Encoding.UTF8, "text/plain"),
+        };
+
+        using var response = await client.SendAsync(request, TestContext.Current.CancellationToken);
+
+        Assert.Equal(HttpStatusCode.UnsupportedMediaType, response.StatusCode);
+    }
+
+    /// <summary>A chat request with its own system prompt returns 400 and does not reach the provider.</summary>
+    /// <returns>A task for the test.</returns>
+    [Fact]
+    public async Task Chat_OwnSystemPrompt_Returns400()
+    {
+        await using var engine = new EngineFactory();
+
+        using var response = await PostAsync(engine, """{"model":"fake/model-a","messages":[{"role":"system","content":"x"},{"role":"user","content":"Hi"}]}""");
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        await AssertErrorFormatAsync(response, "invalid_request_error");
+        Assert.Null(engine.Provider.LastRequest);
+    }
+
+    /// <summary>Sends a JSON body to a system prompt route.</summary>
+    /// <param name="engine">The engine.</param>
+    /// <param name="method">The HTTP method.</param>
+    /// <param name="route">The route.</param>
+    /// <param name="body">The request body.</param>
+    /// <returns>The response.</returns>
+    private static async Task<HttpResponseMessage> SendPromptAsync(EngineFactory engine, HttpMethod method, string route, string body)
+    {
+        using var client = engine.CreateClient();
+        using var request = new HttpRequestMessage(method, route)
+        {
+            Content = new StringContent(body, Encoding.UTF8, "application/json"),
+        };
+        return await client.SendAsync(request, TestContext.Current.CancellationToken);
     }
 
     /// <summary>Checks that a response has the one error format the API uses.</summary>

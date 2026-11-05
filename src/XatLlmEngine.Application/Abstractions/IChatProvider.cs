@@ -18,6 +18,9 @@ public interface IChatProvider
     /// <summary>Gets the request fields this provider accepts, besides <c>model</c> and <c>stream</c>. This list is the provider's request template.</summary>
     IReadOnlyList<string> RequestFields { get; }
 
+    /// <summary>Gets the system prompt from the configuration, which applies from the start of the engine until a caller changes it.</summary>
+    string? SystemPrompt { get; }
+
     /// <summary>Generates a complete answer.</summary>
     /// <param name="request">The validated request.</param>
     /// <param name="cancellationToken">Cancels generation, for example when the caller disconnects.</param>

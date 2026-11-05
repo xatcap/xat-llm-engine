@@ -16,6 +16,9 @@ internal sealed class FakeChatProvider(string name) : IChatProvider
     /// <inheritdoc/>
     public IReadOnlyList<string> RequestFields { get; init; } = ["messages"];
 
+    /// <inheritdoc/>
+    public string? SystemPrompt { get; init; }
+
     /// <summary>Gets the most recent request.</summary>
     public ChatRequest? LastRequest { get; private set; }
 

@@ -16,6 +16,9 @@ internal sealed class FakeProvider : IChatProvider
     /// <inheritdoc/>
     public IReadOnlyList<string> RequestFields { get; } = ["messages", "temperature", "stream_options"];
 
+    /// <inheritdoc/>
+    public string? SystemPrompt => null;
+
     /// <summary>Gets or sets the chunks to stream.</summary>
     public IReadOnlyList<ChatChunk> Chunks { get; set; } = [];
 

@@ -28,6 +28,9 @@ internal sealed class LocalChatProvider(
     public IReadOnlyList<string> RequestFields => options.Value.RequestFields;
 
     /// <inheritdoc/>
+    public string? SystemPrompt => options.Value.SystemPrompt;
+
+    /// <inheritdoc/>
     public Task<Result<ChatCompletion>> CompleteAsync(ChatRequest request, CancellationToken cancellationToken)
     {
         // One reading of the endpoint, because a crash can clear it at any moment.

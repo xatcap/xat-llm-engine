@@ -19,6 +19,9 @@ internal sealed class OpenAiCompatibleChatProvider(string name, ProviderOptions 
     public IReadOnlyList<string> RequestFields => options.RequestFields;
 
     /// <inheritdoc/>
+    public string? SystemPrompt => options.SystemPrompt;
+
+    /// <inheritdoc/>
     public Task<Result<ChatCompletion>> CompleteAsync(ChatRequest request, CancellationToken cancellationToken) =>
         client.CompleteAsync(options.BaseUrl!, options.ApiKey!, request, cancellationToken);
 

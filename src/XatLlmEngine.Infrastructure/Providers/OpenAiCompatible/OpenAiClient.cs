@@ -108,7 +108,7 @@ internal sealed class OpenAiClient(
     private static TokenUsage? ToUsage(OpenAiUsage? usage) =>
         usage is null ? null : new TokenUsage(usage.PromptTokens, usage.CompletionTokens);
 
-    /// <summary>Builds the body to send. The caller's fields pass through unchanged.</summary>
+    /// <summary>Builds the body to send. The caller's fields pass through unchanged. This method adds the stored system prompt as the first message, because model chat templates read it only from there.</summary>
     /// <param name="request">The routed request.</param>
     /// <param name="stream">Whether to ask for a stream.</param>
     /// <returns>The body.</returns>
@@ -116,6 +116,11 @@ internal sealed class OpenAiClient(
     {
         var body = request.Body.DeepClone().AsObject();
         body["model"] = request.Model;
+        if (request.SystemPrompt is { } systemPrompt && body["messages"] is JsonArray messages)
+        {
+            messages.Insert(0, new JsonObject { ["role"] = "system", ["content"] = systemPrompt });
+        }
+
         if (stream)
         {
             body["stream"] = true;
