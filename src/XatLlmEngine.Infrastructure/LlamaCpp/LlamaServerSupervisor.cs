@@ -296,14 +296,12 @@ internal sealed partial class LlamaServerSupervisor : BackgroundService
         return process;
     }
 
-    /// <summary>Tells whether an environment variable holds settings for the engine's API keys or cloud providers.</summary>
+    /// <summary>Tells whether an environment variable holds settings for the engine's cloud providers.</summary>
     /// <param name="name">The variable's name.</param>
     /// <returns><see langword="true"/> when the variable must not reach llama-server.</returns>
     private static bool IsEngineSecret(string name) =>
         name.StartsWith("Providers__", StringComparison.OrdinalIgnoreCase)
-        || name.StartsWith("Providers:", StringComparison.OrdinalIgnoreCase)
-        || name.StartsWith("Engine__", StringComparison.OrdinalIgnoreCase)
-        || name.StartsWith("Engine:", StringComparison.OrdinalIgnoreCase);
+        || name.StartsWith("Providers:", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>Logs one line of server output.</summary>
     /// <param name="line">The line, or <see langword="null"/> when the stream ended.</param>

@@ -56,10 +56,8 @@ public class ApiDocumentationTests
         var chat = paths.GetProperty("/v1/chat/completions").GetProperty("post");
         Assert.True(chat.GetProperty("requestBody").GetProperty("content").TryGetProperty("application/json", out _));
         Assert.True(chat.GetProperty("responses").TryGetProperty("503", out _));
-        Assert.True(chat.TryGetProperty("security", out _));
         Assert.True(paths.GetProperty("/v1/models").TryGetProperty("get", out _));
 
-        Assert.True(document.RootElement.GetProperty("components").GetProperty("securitySchemes").TryGetProperty("Bearer", out _));
         Assert.Equal("xat-llm-engine", document.RootElement.GetProperty("info").GetProperty("title").GetString());
     }
 

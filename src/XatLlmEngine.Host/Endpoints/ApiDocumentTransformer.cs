@@ -4,12 +4,9 @@ using Microsoft.OpenApi;
 
 namespace XatLlmEngine.Host.Endpoints;
 
-/// <summary>Completes the generated API document: its title, the bearer key behind Swagger UI's Authorize button, and a working chat example.</summary>
+/// <summary>Completes the generated API document: its title and a working chat example.</summary>
 internal sealed class ApiDocumentTransformer : IOpenApiDocumentTransformer
 {
-    /// <summary>The name of the security scheme inside the document.</summary>
-    private const string SchemeName = "Bearer";
-
     /// <summary>Describes the chat request body. Swagger UI puts the example into "Try it out", so the example must be a request that the API accepts.</summary>
     /// <param name="document">The generated document.</param>
     private static void DescribeChatRequest(OpenApiDocument document)
@@ -31,28 +28,6 @@ internal sealed class ApiDocumentTransformer : IOpenApiDocumentTransformer
     public Task TransformAsync(OpenApiDocument document, OpenApiDocumentTransformerContext context, CancellationToken cancellationToken)
     {
         document.Info.Title = "xat-llm-engine";
-        document.Components ??= new OpenApiComponents();
-        document.Components.SecuritySchemes ??= new Dictionary<string, IOpenApiSecurityScheme>();
-        document.Components.SecuritySchemes[SchemeName] = new OpenApiSecurityScheme
-        {
-            Type = SecuritySchemeType.Http,
-            Scheme = "bearer",
-            Description = "A key from Engine:ApiKeys. You do not need a key when the configuration has no keys.",
-        };
-
-        var requirement = new OpenApiSecurityRequirement { [new OpenApiSecuritySchemeReference(SchemeName, document)] = [] };
-        foreach (var (path, item) in document.Paths)
-        {
-            // Only the /v1 routes need a key.
-            if (path.StartsWith("/v1/", StringComparison.Ordinal) && item.Operations is { } operations)
-            {
-                foreach (var operation in operations.Values)
-                {
-                    operation.Security = [requirement];
-                }
-            }
-        }
-
         DescribeChatRequest(document);
         return Task.CompletedTask;
     }
