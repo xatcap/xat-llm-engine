@@ -1,6 +1,8 @@
 using System.Text.Json.Nodes;
+using XatLlmEngine.Application.Abstractions;
 using XatLlmEngine.Application.Features.CompleteChat;
 using XatLlmEngine.Application.Features.ListModels;
+using XatLlmEngine.Application.Features.SystemPrompts;
 using XatLlmEngine.Domain;
 
 namespace XatLlmEngine.Application.Tests;
@@ -12,13 +14,23 @@ public class ChatHandlerTests
     /// <returns>The body.</returns>
     private static JsonObject Hello() => new() { ["messages"] = new JsonArray() };
 
+    /// <summary>Builds the use case for complete answers.</summary>
+    /// <param name="providers">The enabled providers.</param>
+    /// <returns>The use case.</returns>
+    private static CompleteChatHandler Complete(params IChatProvider[] providers) => new(providers, new SystemPromptStore(providers));
+
+    /// <summary>Builds the use case for streamed answers.</summary>
+    /// <param name="providers">The enabled providers.</param>
+    /// <returns>The use case.</returns>
+    private static StreamChatHandler Stream(params IChatProvider[] providers) => new(providers, new SystemPromptStore(providers));
+
     /// <summary>The provider prefix selects the provider, which receives the name without the prefix.</summary>
     /// <returns>A task for the test.</returns>
     [Fact]
     public async Task Complete_KnownProvider_RoutesWithoutPrefix()
     {
         var chosen = new FakeChatProvider("chosen");
-        var handler = new CompleteChatHandler([new FakeChatProvider("other"), chosen]);
+        var handler = Complete(new FakeChatProvider("other"), chosen);
 
         var result = await handler.HandleAsync(new CompleteChatCommand("chosen/some/model", Hello()), TestContext.Current.CancellationToken);
 
@@ -32,7 +44,7 @@ public class ChatHandlerTests
     [Fact]
     public async Task Complete_ProviderNameInOtherCase_StillRoutes()
     {
-        var handler = new CompleteChatHandler([new FakeChatProvider("OpenAI")]);
+        var handler = Complete(new FakeChatProvider("OpenAI"));
 
         var result = await handler.HandleAsync(new CompleteChatCommand("openai/model", Hello()), TestContext.Current.CancellationToken);
 
@@ -44,7 +56,7 @@ public class ChatHandlerTests
     [Fact]
     public async Task Complete_UnknownProvider_FailsAsNotFound()
     {
-        var handler = new CompleteChatHandler([new FakeChatProvider("known")]);
+        var handler = Complete(new FakeChatProvider("known"));
 
         var result = await handler.HandleAsync(new CompleteChatCommand("unknown/model", Hello()), TestContext.Current.CancellationToken);
 
@@ -57,7 +69,7 @@ public class ChatHandlerTests
     public async Task Stream_ProviderFails_ReturnsThatFailure()
     {
         var failure = new EngineError(ErrorKind.RateLimited, "Slow down.");
-        var handler = new StreamChatHandler([new FakeChatProvider("cloud") { Failure = failure }]);
+        var handler = Stream(new FakeChatProvider("cloud") { Failure = failure });
 
         var result = await handler.HandleAsync(new CompleteChatCommand("cloud/model", Hello()), TestContext.Current.CancellationToken);
 
@@ -70,7 +82,7 @@ public class ChatHandlerTests
     public async Task Complete_FieldNotInTemplate_FailsAndNamesIt()
     {
         var provider = new FakeChatProvider("cloud");
-        var handler = new CompleteChatHandler([provider]);
+        var handler = Complete(provider);
         var body = Hello();
         body["seed"] = 7;
 
@@ -87,11 +99,9 @@ public class ChatHandlerTests
     [Fact]
     public async Task Complete_SameField_DependsOnProvider()
     {
-        var handler = new CompleteChatHandler(
-        [
+        var handler = Complete(
             new FakeChatProvider("with") { RequestFields = ["messages", "seed"] },
-            new FakeChatProvider("without"),
-        ]);
+            new FakeChatProvider("without"));
         var body = Hello();
         body["seed"] = 7;
 
@@ -107,7 +117,7 @@ public class ChatHandlerTests
     [Fact]
     public async Task Complete_ModelAndStream_AreAlwaysAccepted()
     {
-        var handler = new CompleteChatHandler([new FakeChatProvider("cloud")]);
+        var handler = Complete(new FakeChatProvider("cloud"));
         var body = Hello();
         body["model"] = "cloud/model";
         body["stream"] = false;
@@ -115,6 +125,61 @@ public class ChatHandlerTests
         var result = await handler.HandleAsync(new CompleteChatCommand("cloud/model", body), TestContext.Current.CancellationToken);
 
         Assert.True(result.IsSuccess);
+    }
+
+    /// <summary>A request cannot set its own system prompt, with or without a stored prompt. Case differences do not avoid the check.</summary>
+    /// <param name="body">The request body.</param>
+    /// <param name="configuredPrompt">The provider's stored prompt.</param>
+    /// <returns>A task for the test.</returns>
+    [Theory]
+    [InlineData("""{"system":"x","messages":[]}""", null)]
+    [InlineData("""{"system":null,"messages":[]}""", null)]
+    [InlineData("""{"messages":[{"role":"system","content":"x"}]}""", null)]
+    [InlineData("""{"messages":[{"role":"developer","content":"x"}]}""", null)]
+    [InlineData("""{"messages":[{"role":"System","content":"x"}]}""", null)]
+    [InlineData("""{"messages":[{"role":"user","content":"a"},{"role":"system","content":"x"}]}""", null)]
+    [InlineData("""{"messages":[{"role":"system","content":"x"}]}""", "stored")]
+    public async Task Complete_OwnSystemPrompt_Fails(string body, string? configuredPrompt)
+    {
+        var provider = new FakeChatProvider("cloud") { RequestFields = ["messages", "system"], SystemPrompt = configuredPrompt };
+
+        var result = await Complete(provider).HandleAsync(new CompleteChatCommand("cloud/model", JsonNode.Parse(body)!.AsObject()), TestContext.Current.CancellationToken);
+
+        Assert.Equal(ErrorKind.InvalidRequest, result.Error!.Kind);
+        Assert.Contains("/v1/system-prompts/cloud", result.Error.Message, StringComparison.Ordinal);
+        Assert.Null(provider.LastRequest);
+    }
+
+    /// <summary>A message with an unusual role goes to the provider, which decides whether that role is valid.</summary>
+    /// <returns>A task for the test.</returns>
+    [Fact]
+    public async Task Complete_NonTextRole_ReachesProvider()
+    {
+        var provider = new FakeChatProvider("cloud");
+        var body = JsonNode.Parse("""{"messages":[{"role":5,"content":"x"},"text"]}""")!.AsObject();
+
+        var result = await Complete(provider).HandleAsync(new CompleteChatCommand("cloud/model", body), TestContext.Current.CancellationToken);
+
+        Assert.True(result.IsSuccess);
+    }
+
+    /// <summary>The router gives the provider its current stored prompt, for both answer types.</summary>
+    /// <returns>A task for the test.</returns>
+    [Fact]
+    public async Task Handlers_StoredPrompt_ReachesProvider()
+    {
+        var provider = new FakeChatProvider("cloud");
+        IChatProvider[] providers = [provider];
+        var store = new SystemPromptStore(providers);
+        store.Replace("cloud", "Be brief.");
+
+        await new CompleteChatHandler(providers, store).HandleAsync(new CompleteChatCommand("cloud/model", Hello()), TestContext.Current.CancellationToken);
+        var completePrompt = provider.LastRequest!.SystemPrompt;
+        store.Replace("cloud", "Be kind.");
+        await new StreamChatHandler(providers, store).HandleAsync(new CompleteChatCommand("cloud/model", Hello()), TestContext.Current.CancellationToken);
+
+        Assert.Equal("Be brief.", completePrompt);
+        Assert.Equal("Be kind.", provider.LastRequest!.SystemPrompt);
     }
 
     /// <summary>The handler lists every model with its provider prefix, so that a caller can send the same text back.</summary>

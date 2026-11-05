@@ -56,4 +56,7 @@ public sealed class LlamaCppOptions
     /// <summary>Gets the request fields the local model accepts, besides <c>model</c> and <c>stream</c>. This list is its request template.</summary>
     [MinLength(1, ErrorMessage = "RequestFields must list at least one field.")]
     public IReadOnlyList<string> RequestFields { get; init; } = [];
+
+    /// <summary>Gets the system prompt to use from the start of the engine. Callers can change it through the API until the next restart. Blank means no prompt, so the default in the model's chat template applies.</summary>
+    public string? SystemPrompt { get; init; }
 }

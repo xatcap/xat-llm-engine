@@ -35,6 +35,9 @@ internal sealed class AnthropicChatProvider(
     public IReadOnlyList<string> RequestFields => options.RequestFields;
 
     /// <inheritdoc/>
+    public string? SystemPrompt => options.SystemPrompt;
+
+    /// <inheritdoc/>
     public async Task<Result<ChatCompletion>> CompleteAsync(ChatRequest request, CancellationToken cancellationToken)
     {
         try
@@ -118,7 +121,7 @@ internal sealed class AnthropicChatProvider(
         return await client.SendAsync(message, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
     }
 
-    /// <summary>Builds the body to send. The caller's fields pass through unchanged. If the token limit is missing, this method adds it, because the API requires it.</summary>
+    /// <summary>Builds the body to send. The caller's fields pass through unchanged. This method adds the stored system prompt. If the token limit is missing, this method adds it, because the API requires it.</summary>
     /// <param name="request">The routed request.</param>
     /// <param name="stream">Whether to ask for a stream.</param>
     /// <returns>The body.</returns>
@@ -127,6 +130,11 @@ internal sealed class AnthropicChatProvider(
         var body = request.Body.DeepClone().AsObject();
         body["model"] = request.Model;
         body["max_tokens"] ??= options.DefaultMaxTokens;
+        if (request.SystemPrompt is { } systemPrompt)
+        {
+            body["system"] = systemPrompt;
+        }
+
         if (stream)
         {
             body["stream"] = true;

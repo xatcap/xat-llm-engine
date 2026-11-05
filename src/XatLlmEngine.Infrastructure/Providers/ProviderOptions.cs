@@ -25,6 +25,9 @@ public sealed class ProviderOptions
     [MinLength(1, ErrorMessage = "RequestFields must list at least one field.")]
     public IReadOnlyList<string> RequestFields { get; init; } = [];
 
+    /// <summary>Gets the system prompt to use from the start of the engine. Callers can change it through the API until the next restart. Blank means no prompt.</summary>
+    public string? SystemPrompt { get; init; }
+
     /// <summary>Gets the token limit to use when a caller sends none. Anthropic requires a limit on every request.</summary>
     [Range(1, int.MaxValue)]
     public int DefaultMaxTokens { get; init; } = 4096;

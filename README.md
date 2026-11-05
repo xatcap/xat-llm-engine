@@ -59,18 +59,28 @@ for chunk in client.chat.completions.create(
         print(chunk.choices[0].delta.content, end="")
 ```
 
-Anthropic uses its own format, so this request sends `system` and `max_tokens` as top-level fields:
+Anthropic uses its own format, so this request sends `max_tokens` as a top-level field:
 
 ```bash
 curl http://127.0.0.1:8420/v1/chat/completions \
   -H "Content-Type: application/json" \
-  -d '{"model":"anthropic/claude-sonnet-5-5","system":"Answer in one sentence.","max_tokens":256,"messages":[{"role":"user","content":"Hello"}]}'
+  -d '{"model":"anthropic/claude-sonnet-5-5","max_tokens":256,"messages":[{"role":"user","content":"Hello"}]}'
+```
+
+Set the Anthropic system prompt with a `PUT` request. The prompt applies to every later Anthropic request until the next restart.
+
+```bash
+curl -X PUT http://127.0.0.1:8420/v1/system-prompts/anthropic \
+  -H "Content-Type: application/json" \
+  -d '{"prompt":"Answer in one sentence."}'
 ```
 
 | Route | Purpose |
 |---|---|
 | `POST /v1/chat/completions` | Chat, with or without streaming. The accepted fields depend on the provider. See [Request templates](#request-templates). |
 | `GET /v1/models` | Lists the configured models as `provider/model`. |
+| `PUT /v1/system-prompts/{provider}` | Replaces the provider's system prompt. An empty value clears it. Body: `{"prompt":"..."}`. Returns 200 and the full prompt as `{"provider","prompt"}`. See [System prompts](#system-prompts). |
+| `POST /v1/system-prompts/{provider}/append` | Adds text to the end of the provider's system prompt. A newline separates the text from the existing prompt. Body: `{"prompt":"..."}`. Returns 200 and the full prompt as `{"provider","prompt"}`. |
 | `GET /health` | Returns `status` (`healthy` or `degraded`), `local` (`ready`, `starting`, `restarting`, `missing`, `stopped` or `disabled`) and `message`, which explains `local`. It always returns 200, including while the local model loads. Read `local` to see whether the local model is ready. |
 | `GET /swagger` | Swagger UI. Development only. |
 | `GET /openapi/v1.json` | The OpenAPI document. Development only. |
@@ -79,7 +89,7 @@ Answers are text only. `tools` and `n` are not in any template, because the unif
 
 | Status | Meaning |
 |---|---|
-| 400 | The request is invalid, including a field the provider does not list, or the provider rejected it. |
+| 400 | The request is invalid. This includes a field the provider does not list, and a chat request that sets a system prompt. The provider can also reject the request. |
 | 404 | The route, provider or model does not exist. A cloud provider with no API key counts as not existing. |
 | 405 | The route exists, but does not accept this HTTP method. |
 | 415 | The `Content-Type` is not `application/json`. |
@@ -98,7 +108,7 @@ Each provider accepts only the fields in its template. The engine forwards these
 | Provider | Accepted fields |
 |---|---|
 | `local` | `messages`, `temperature`, `top_p`, `max_tokens`, `stop`, `stream_options`, `top_k`, `min_p`, `repeat_penalty`, `seed`, `frequency_penalty`, `presence_penalty`, `response_format`, `grammar` |
-| `anthropic` | `messages`, `system`, `max_tokens`, `temperature`, `top_p`, `top_k`, `stop_sequences`, `metadata` |
+| `anthropic` | `messages`, `max_tokens`, `temperature`, `top_p`, `top_k`, `stop_sequences`, `metadata` |
 | `openai` | `messages`, `temperature`, `top_p`, `max_completion_tokens`, `stop`, `stream_options`, `seed`, `frequency_penalty`, `presence_penalty`, `response_format`, `reasoning_effort`, `user` |
 | `mistral` | `messages`, `temperature`, `top_p`, `max_tokens`, `stop`, `random_seed`, `safe_prompt`, `frequency_penalty`, `presence_penalty`, `response_format` |
 
@@ -113,6 +123,28 @@ Streaming usage depends on the provider:
 - OpenAI-format providers send a usage piece only when the caller sets `stream_options.include_usage`.
 - Mistral's template has no `stream_options`, so Mistral streams carry no usage.
 - Anthropic streams always end with a usage piece. Its `choices` is empty.
+
+## System prompts
+
+Each provider has its own system prompt. The engine keeps the prompts in memory. A restart returns each provider to its `SystemPrompt` setting.
+
+Use `PUT /v1/system-prompts/{provider}` to replace a prompt. Use `POST /v1/system-prompts/{provider}/append` to add text to the end of it. Both routes take `{"prompt":"..."}`.
+
+A blank prompt, which is empty or only spaces, means that the engine adds nothing.
+
+Chat requests cannot set a system prompt. The engine returns 400 when a request has a top-level `system` field. It also returns 400 when a message has the role `system` or `developer`, in any letter case. This applies to every provider, even when no prompt is stored. This breaks OpenAI client code and frameworks that add a system message. Remove the system message from the request, and use a stored prompt instead.
+
+The bundled local model has a default prompt in its chat template. A stored prompt replaces this default completely. Append adds text only to the stored prompt. With no stored prompt, the appended text becomes the whole prompt, and the default no longer applies. Send `"prompt":""` to clear the prompt. The engine then adds nothing, and the default applies again.
+
+Vendors may add their own instructions to every request. A stored prompt cannot remove the behaviour that a model is trained with. Cloud behaviour has not been tested against live vendor APIs.
+
+These errors apply to the system prompt routes:
+
+- 404: the provider is unknown, the local model is disabled, or a cloud provider has no API key.
+- 400: the body is malformed, or `prompt` is missing or is not text.
+- 415: the `Content-Type` is not `application/json`.
+
+These routes have no authentication. Any program on this machine can change a provider's prompt. The change affects every caller of that provider until the next restart. The prompt is not a security control. A caller can still add instructions to a `user` message.
 
 ## Supported models
 
@@ -147,6 +179,7 @@ Settings live in `appsettings.json`, next to the program. This file lists every 
 | `Providers__<name>__MaxRetries` | How many times to retry a 429, 5xx or unreachable response from that provider. Retries happen only before the answer starts. The engine obeys a `Retry-After` header, up to 30 seconds. The default is 2. |
 | `Providers__<name>__RequestTimeoutSeconds` | How long to wait for the provider to start its answer, across all retries. The default is 600. |
 | `Providers__<name>__DefaultMaxTokens` | The token limit when a caller sends none. Only Anthropic uses it, because its API requires a limit. The default is 4096. |
+| `Providers__<name>__SystemPrompt` | The system prompt at engine start. Callers can change it until the next restart. Blank by default. |
 | `Providers__<name>__RequestFields__0` | Sets the field at index 0 of a provider's request template. Add more with `__1`, `__2` and so on. Overrides replace entries by index, and they cannot shorten the list. To remove a field, edit `appsettings.json`. |
 | `Urls` | The listening address. It must be a loopback address. The default is `http://127.0.0.1:8420`. |
 | `AllowedHosts` | The host names callers may use. The default allows only loopback names. |
@@ -154,6 +187,7 @@ Settings live in `appsettings.json`, next to the program. This file lists every 
 | `LocalModel__GpuLayers` | `auto` (default), `all`, or a number. Use `0` to run on the CPU only. |
 | `LocalModel__Parallel` | How many requests generate at once. These requests share the context size. The default is 1. |
 | `LocalModel__DefaultTemperature` | The temperature when a caller sends none. The default is 0.07, as Mistral recommends values below 0.1. |
+| `LocalModel__SystemPrompt` | The system prompt at engine start. Callers can change it until the next restart. Blank by default. |
 | `LocalModel__StartupTimeoutSeconds` | How long the model may take to load. The default is 600. |
 | `LocalModel__HealthCheckIntervalSeconds` | Seconds between health checks of a running llama-server. Three failed checks in a row make the engine replace it, because a hung server never exits by itself. The default is 10. |
 | `LocalModel__ExtraArguments__0` | An extra `llama-server` argument. Add more with `__1`, `__2` and so on. |

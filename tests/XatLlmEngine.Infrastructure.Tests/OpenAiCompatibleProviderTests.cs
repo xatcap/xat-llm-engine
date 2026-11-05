@@ -55,6 +55,55 @@ public class OpenAiCompatibleProviderTests
         Assert.False(body.RootElement.TryGetProperty("stream", out _));
     }
 
+    /// <summary>The stored prompt becomes the first message, because model chat templates read it only from there.</summary>
+    /// <returns>A task for the test.</returns>
+    [Fact]
+    public async Task Complete_StoredPrompt_IsFirstMessage()
+    {
+        var http = new StubHttpHandler(HttpStatusCode.OK, CompletionBody);
+
+        await Provider(http).CompleteAsync(TestRequests.Minimal with { SystemPrompt = "Be brief." }, TestContext.Current.CancellationToken);
+
+        using var body = JsonDocument.Parse(http.LastBody!);
+        var messages = body.RootElement.GetProperty("messages");
+        Assert.Equal(2, messages.GetArrayLength());
+        Assert.Equal("system", messages[0].GetProperty("role").GetString());
+        Assert.Equal("Be brief.", messages[0].GetProperty("content").GetString());
+        Assert.Equal("user", messages[1].GetProperty("role").GetString());
+    }
+
+    /// <summary>With no stored prompt, the engine adds no message, so a model's own default applies.</summary>
+    /// <returns>A task for the test.</returns>
+    [Fact]
+    public async Task Complete_NoStoredPrompt_AddsNoMessage()
+    {
+        var http = new StubHttpHandler(HttpStatusCode.OK, CompletionBody);
+
+        await Provider(http).CompleteAsync(TestRequests.Minimal, TestContext.Current.CancellationToken);
+
+        using var body = JsonDocument.Parse(http.LastBody!);
+        Assert.Equal(1, body.RootElement.GetProperty("messages").GetArrayLength());
+    }
+
+    /// <summary>A streamed request also carries the stored prompt.</summary>
+    /// <returns>A task for the test.</returns>
+    [Fact]
+    public async Task Stream_StoredPrompt_IsSent()
+    {
+        var http = new StubHttpHandler(HttpStatusCode.OK, StreamBody);
+
+        var result = await Provider(http).StreamAsync(TestRequests.Minimal with { SystemPrompt = "Be brief." }, TestContext.Current.CancellationToken);
+        await foreach (var chunk in result.Value!.WithCancellation(TestContext.Current.CancellationToken))
+        {
+            Assert.NotNull(chunk);
+        }
+
+        using var body = JsonDocument.Parse(http.LastBody!);
+        var messages = body.RootElement.GetProperty("messages");
+        Assert.Equal("system", messages[0].GetProperty("role").GetString());
+        Assert.Equal("Be brief.", messages[0].GetProperty("content").GetString());
+    }
+
     /// <summary>Values the caller left out are not sent, so that the provider's defaults apply.</summary>
     /// <returns>A task for the test.</returns>
     [Fact]
