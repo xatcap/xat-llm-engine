@@ -13,8 +13,8 @@ namespace XatLlmEngine.Infrastructure.Providers.Anthropic;
 /// <summary>Serves chat requests through the Anthropic Messages API.</summary>
 /// <remarks>Callers send Anthropic's own request format, and this adapter converts the answer to the engine's unified response.</remarks>
 /// <param name="name">The provider's name.</param>
-/// <param name="options">The provider's settings. Its base URL and key must be set.</param>
-/// <param name="httpClientFactory">Creates HTTP clients, so that connections are pooled properly.</param>
+/// <param name="options">The provider's settings. These settings must include its base URL and key.</param>
+/// <param name="httpClientFactory">Creates HTTP clients, so that the connection pool works correctly.</param>
 /// <param name="httpClientName">The named client, which carries the provider's resilience settings.</param>
 internal sealed class AnthropicChatProvider(
     string name,
@@ -22,7 +22,7 @@ internal sealed class AnthropicChatProvider(
     IHttpClientFactory httpClientFactory,
     string httpClientName) : IChatProvider
 {
-    /// <summary>The API version this adapter was written against.</summary>
+    /// <summary>The API version that this adapter was built for.</summary>
     private const string ApiVersion = "2023-06-01";
 
     /// <inheritdoc/>
@@ -118,7 +118,7 @@ internal sealed class AnthropicChatProvider(
         return await client.SendAsync(message, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
     }
 
-    /// <summary>Builds the body to send. The caller's fields pass through unchanged, and the token limit the API requires is added when missing.</summary>
+    /// <summary>Builds the body to send. The caller's fields pass through unchanged. If the token limit is missing, this method adds it, because the API requires it.</summary>
     /// <param name="request">The routed request.</param>
     /// <param name="stream">Whether to ask for a stream.</param>
     /// <returns>The body.</returns>
@@ -172,12 +172,12 @@ internal sealed class AnthropicChatProvider(
     /// <summary>Parses one stream event.</summary>
     /// <param name="item">The raw event.</param>
     /// <returns>The parsed event.</returns>
-    /// <exception cref="ChatStreamException">The event reports an error or cannot be read.</exception>
+    /// <exception cref="ChatStreamException">The event reports an error, or the engine cannot read it.</exception>
     private AnthropicEvent? Parse(SseItem<string> item)
     {
         if (item.EventType == "error")
         {
-            throw new ChatStreamException(new EngineError(ErrorKind.Upstream, $"The provider '{name}' failed while streaming."));
+            throw new ChatStreamException(new EngineError(ErrorKind.Upstream, $"The provider '{name}' failed during the stream."));
         }
 
         try

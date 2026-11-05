@@ -55,7 +55,7 @@ def download_verified(url, destination, expected_sha256):
     partial = destination.with_name(destination.name + ".part")
     print(f"Downloading {url}")
     request = urllib.request.Request(url, headers={"User-Agent": "xat-llm-engine-release"})
-    # The timeout applies to each read, so a stalled download fails but a slow one does not.
+    # The timeout applies to each read, so a download that receives no data fails but a slow download does not.
     with urllib.request.urlopen(request, timeout=120) as response, open(partial, "wb") as file:
         shutil.copyfileobj(response, file, 1024 * 1024)
 
@@ -88,14 +88,14 @@ def program_file_name(rid):
 
 
 def clean_tar_entry(entry):
-    """Removes the build machine's owner, which would otherwise be restored when root unpacks the archive."""
+    """Removes the owner from the build machine. If it stays, root restores it when root unpacks the archive."""
     entry.uid = entry.gid = 0
     entry.uname = entry.gname = ""
     return entry
 
 
 def stop_engine(engine, rid):
-    """Stops the engine. Windows has no gentle signal here, so the whole process tree is stopped, which also frees the files."""
+    """Stops the engine. Windows has no gentle signal here, so this stops the whole process tree, which also frees the files."""
     if rid.startswith("win"):
         subprocess.run(["taskkill", "/T", "/F", "/PID", str(engine.pid)], check=False)
     else:
@@ -104,7 +104,7 @@ def stop_engine(engine, rid):
 
 @contextlib.contextmanager
 def work_folder(parent):
-    """Gives a temporary folder and removes it afterwards, because the folder sits in the cached model folder and must not be cached."""
+    """Gives a temporary folder and removes it after use. The folder is in the cached model folder, and the cache must not include it."""
     work = tempfile.mkdtemp(dir=parent)
     try:
         yield work
@@ -113,14 +113,14 @@ def work_folder(parent):
 
 
 def remove_folder(folder, attempts=30):
-    """Removes a folder, retrying because Windows refuses to delete a program's files until the stopped program has fully gone."""
+    """Removes a folder. It retries, because Windows does not delete the files of a program until that program has fully stopped."""
     for attempt in range(1, attempts + 1):
         try:
             shutil.rmtree(folder)
         except PermissionError as error:
             if attempt == attempts:
                 raise
-            print(f"Could not remove the folder yet (attempt {attempt}): {error}", flush=True)
+            print(f"Could not remove the folder at attempt {attempt}, and will try again: {error}", flush=True)
             time.sleep(1)
         else:
             return
@@ -313,7 +313,7 @@ def smoke_test(args):
             deadline = time.monotonic() + 15
             while process_exists_with_server_name(rid):
                 if time.monotonic() > deadline:
-                    sys.exit("llama-server kept running after the engine stopped.")
+                    sys.exit("llama-server continued to run after the engine stopped.")
                 time.sleep(0.5)
     print("Smoke test passed.")
 
@@ -331,7 +331,7 @@ def finalize(args):
             sys.exit(f"{path.name} is {size} bytes, which GitHub would reject. The limit is {GITHUB_ASSET_LIMIT}.")
         lines.append(f"{sha256_of(path)}  {path.name}")
     (folder / "SHA256SUMS").write_text("\n".join(lines) + "\n", encoding="utf-8")
-    print("All files are under the limit. SHA256SUMS written.")
+    print("All files are under the limit. The script wrote SHA256SUMS.")
 
 
 def main():

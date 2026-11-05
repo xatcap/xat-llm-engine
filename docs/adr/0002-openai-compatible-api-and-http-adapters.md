@@ -6,7 +6,7 @@
 
 ## Context
 
-External processes need one interface to local and cloud models. Those processes may be written in any language, and many already use an OpenAI client library.
+External processes need one interface to local and cloud models. Those processes can use any language, and many already use an OpenAI client library.
 
 ## Decision
 
@@ -16,9 +16,9 @@ Adapters use `HttpClient` directly rather than vendor SDKs. One `OpenAiCompatibl
 
 ## Consequences
 
-- Existing OpenAI clients work by changing their base URL and model name.
-- Adding a compatible vendor needs configuration only, and all providers share streaming and error behaviour.
-- Unsupported features such as tools return a 400 error rather than being silently ignored. Each new feature must be added to the adapters by hand.
+- To use an existing OpenAI client, change its base URL and model name.
+- A new compatible vendor needs only configuration. All providers share the same streaming and error behaviour.
+- Unsupported features such as tools return a 400 error. The engine does not ignore them silently. A developer must add each new feature to the adapters.
 - The engine must track vendor API changes itself, without help from an SDK update.
 
 ## Alternatives considered

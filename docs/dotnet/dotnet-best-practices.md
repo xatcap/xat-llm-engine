@@ -1,6 +1,6 @@
 # .NET Best Practices
 
-Platform-level guidance for .NET 10: how projects are set up, built, composed, configured, observed, packaged, and tested. For language-level guidance see [C# Best Practices](./csharp-best-practices.md).
+This page gives platform-level guidance for .NET 10. It shows how to set up, build, compose, configure, observe, package, and test projects. For language-level guidance, see [C# Best Practices](./csharp-best-practices.md).
 
 ---
 
@@ -16,7 +16,7 @@ Platform-level guidance for .NET 10: how projects are set up, built, composed, c
 }
 ```
 
-  Without `"rollForward": "disable"`, a newer SDK preinstalled on a CI runner (even just a newer patch) can be picked instead and change the build. `dotnet` reads `global.json` from the working directory or a parent, so run it from inside the library folder.
+  Without `"rollForward": "disable"`, the build can select a newer SDK that a CI runner already has, even a newer patch. This can change the build. `dotnet` reads `global.json` from the working directory or a parent, so run it from inside the project folder.
 
 - Centralise shared settings in **`Directory.Build.props`** at the repo root:
 
@@ -37,11 +37,11 @@ Platform-level guidance for .NET 10: how projects are set up, built, composed, c
 </Project>
 ```
 
-- Use **Central Package Management** (`Directory.Packages.props` with `ManagePackageVersionsCentrally`) so every package version is declared once.
+- Use **Central Package Management** (`Directory.Packages.props` with `ManagePackageVersionsCentrally`) so that each package version has one declaration.
 - Commit an **`.editorconfig`** that holds naming, style, and analyzer severities. It is the single source of truth for style.
 - Enable `NuGetAudit` for vulnerability-checked restores.
 
-**Don't**
+**Do not**
 - Commit `bin/`, `obj/`, `.vs/`, user files (`*.user`), or binary dependencies. Restore packages from NuGet feeds.
 - Reference DLLs by path (`<Reference HintPath=...>`) when a package exists. If a vendor library has no package, publish it to an internal feed.
 - Suppress analyzer warnings globally. Suppress locally, with a justification (`[SuppressMessage(..., Justification = "...")]`).
@@ -50,7 +50,7 @@ Platform-level guidance for .NET 10: how projects are set up, built, composed, c
 
 ## Dependency injection
 
-The *principle* is covered in [SOLID › DIP](./solid-principles.md#dependency-inversion-principle-dip). This section covers the container mechanics in `Microsoft.Extensions.DependencyInjection`.
+[SOLID › DIP](./solid-principles.md#dependency-inversion-principle-dip) covers the *principle*. This section covers the container mechanics in `Microsoft.Extensions.DependencyInjection`.
 
 **Do**
 - Use **constructor injection**. Primary constructors keep it concise.
@@ -73,22 +73,22 @@ public static class DeviceServiceCollectionExtensions
 }
 ```
 
-- Choose lifetimes deliberately:
+- Choose lifetimes with care:
 
   | Lifetime | Use for | Watch out for |
   |----------|---------|---------------|
   | Singleton | Stateless services, caches, clients that own a physical resource (port, socket) | Must be thread-safe. Must not depend on scoped services. |
   | Scoped | Per-request/per-operation units of work (`DbContext`) | Outside ASP.NET Core you must create scopes yourself (`IServiceScopeFactory`). |
-  | Transient | Lightweight, stateless helpers | Disposable transients are tracked until their scope ends. |
+  | Transient | Lightweight, stateless helpers | The container tracks disposable transients until their scope ends. |
 
 - Enable `ValidateScopes` and `ValidateOnBuild` (on by default in Development) to catch **captive dependencies**, for example a singleton holding a scoped service.
-- Use **keyed services** (`AddKeyedSingleton<IPrinter, LaserPrinter>("laser")` with `[FromKeyedServices("laser")]`) when several implementations of one interface are selected by name. Don't hand-roll factories for this.
+- Use **keyed services** (`AddKeyedSingleton<IPrinter, LaserPrinter>("laser")` with `[FromKeyedServices("laser")]`) when you select one of several implementations of an interface by name. Do not write your own factories for this.
 
-**Don't**
-- Use the **service locator** pattern: injecting `IServiceProvider` and calling `GetService` in business code. The exception is factories and infrastructure plumbing.
-- Use `static` mutable state or hand-rolled singletons (`Instance` properties). Let the container own lifetimes.
-- Have constructors that do work (I/O, connecting to devices). Constructors assign; do the work in an explicit `StartAsync`/`OpenAsync` or a hosted service.
-- Inject more than about 5 dependencies. That signals the class has too many responsibilities ([SRP](./solid-principles.md#single-responsibility-principle-srp)).
+**Do not**
+- Use the **service locator** pattern, which injects `IServiceProvider` and calls `GetService` in business code. Factories and low-level infrastructure code are the exception.
+- Use `static` mutable state or your own singletons (`Instance` properties). Let the container own lifetimes.
+- Write constructors that do work (I/O, device connection). Constructors only assign values. Do the work in an explicit `StartAsync`/`OpenAsync` or a hosted service.
+- Inject more than about 5 dependencies. This shows that the class has too many responsibilities ([SRP](./solid-principles.md#single-responsibility-principle-srp)).
 
 ---
 
@@ -114,10 +114,10 @@ public sealed class DeviceOptions
 - Layer configuration sources: `appsettings.json` → `appsettings.{Environment}.json` → environment variables → command line → secret store.
 - Use [source-generated options validation](https://learn.microsoft.com/dotnet/core/extensions/options-validation-generator) (`[OptionsValidator]`) for trimming- and AOT-friendly validation.
 
-**Don't**
+**Do not**
 - Read `IConfiguration["Some:Key"]` deep inside business code.
 - Keep secrets (passwords, keys, connection strings with credentials) in source control. Use User Secrets locally and a vault or environment variables in deployed environments.
-- Write configuration files at runtime to persist application state. Use a proper store.
+- Write configuration files at runtime to persist application state. Use a correct store.
 
 ---
 
@@ -146,15 +146,15 @@ internal static partial class Log
   |-------|---------|
   | `Trace`/`Debug` | Diagnostic detail; off in production by default |
   | `Information` | Significant lifecycle events (started, completed, connected) |
-  | `Warning` | Unexpected but recovered; may need attention |
+  | `Warning` | Unexpected, but the application recovered. It can need attention. |
   | `Error` | An operation failed |
   | `Critical` | The application/component cannot continue |
 
 - Pass the exception object itself: `logger.LogError(ex, "...")`.
 - Use log scopes (`logger.BeginScope`) to attach correlation data such as an operation ID.
 
-**Don't**
-- Use string interpolation or concatenation in log calls (`$"Job {id}"`). It defeats structured logging and allocates even when the level is disabled.
+**Do not**
+- Use string interpolation or concatenation in log calls (`$"Job {id}"`). It stops structured logging, and it allocates memory even when the level is off.
 - Log secrets, personal data, or full payloads.
 - Write custom file loggers. Plug a provider (console, OpenTelemetry, Serilog sink) into `ILogger`.
 
@@ -186,25 +186,25 @@ public sealed class StatusPoller(IDeviceStatusReader reader, ILogger<StatusPolle
 - Use **`System.Threading.Channels`** for producer/consumer pipelines between components.
 - Inject **`TimeProvider`** instead of calling `DateTime.Now`/`UtcNow`. Tests can then use `FakeTimeProvider`. Store and transmit times in UTC (`DateTimeOffset`).
 - Use **`IHttpClientFactory`** (typed or named clients) and add resilience with `Microsoft.Extensions.Http.Resilience` (`AddStandardResilienceHandler()`).
-- For non-HTTP resilience (device I/O, queues), use **Polly v8** resilience pipelines rather than hand-written retry loops.
+- For non-HTTP resilience (device I/O, queues), use **Polly v8** resilience pipelines. Do not write your own retry loops.
 
-**Don't**
+**Do not**
 - Use `System.Timers.Timer`, `BackgroundWorker`, or raw `Thread`s for background work in new code.
-- `new HttpClient()` per call. It exhausts sockets and ignores DNS changes.
-- Let an unhandled exception escape `ExecuteAsync` silently. By default (`BackgroundServiceExceptionBehavior.StopHost`) it stops the host, so decide explicitly.
+- Call `new HttpClient()` for each request. It uses all available sockets and ignores DNS changes.
+- Let an unhandled exception leave `ExecuteAsync` silently. By default (`BackgroundServiceExceptionBehavior.StopHost`) it stops the host, so choose the behaviour explicitly.
 
 ---
 
 ## Observability
 
 **Do**
-- Instrument with **OpenTelemetry**: logs via `ILogger`, metrics via `System.Diagnostics.Metrics.Meter`, traces via `ActivitySource`.
+- Instrument with **OpenTelemetry**: logs through `ILogger`, metrics through `System.Diagnostics.Metrics.Meter`, traces through `ActivitySource`.
 - Define meters and activity sources per component, with stable names (`Company.Product.Component`).
 - Expose **health checks** (`AddHealthChecks()`) that report the real state of dependencies, including devices, databases, and external services.
 - Propagate correlation IDs across process boundaries (W3C trace context).
 
-**Don't**
-- Build bespoke status or telemetry plumbing when the standard APIs cover it.
+**Do not**
+- Build your own status or telemetry code when the standard APIs cover it.
 
 ---
 
@@ -217,20 +217,20 @@ public sealed class StatusPoller(IDeviceStatusReader reader, ILogger<StatusPolle
 - Make the library **DI-friendly without requiring DI**: provide an `AddXyz(this IServiceCollection)` extension in a separate package or namespace, and keep types constructible by hand.
 - Depend only on `Microsoft.Extensions.*.Abstractions` packages (logging, options), not on concrete hosting.
 - Ship nullable annotations, XML docs, **SourceLink**, and symbol packages (`.snupkg`). Set `PackageReadmeFile`, `PackageLicenseExpression`, and `RepositoryUrl`.
-- Multi-target (`<TargetFrameworks>net10.0;netstandard2.0</TargetFrameworks>`) **only** if consumers need it, and isolate the differences with `#if` in as few places as possible.
+- Use multiple targets (`<TargetFrameworks>net10.0;netstandard2.0</TargetFrameworks>`) **only** if consumers need them. Keep the `#if` differences in as few places as possible.
 - Mark obsolete APIs with `[Obsolete("Use X instead.")]` for at least one minor release before removing them.
 
-**Don't**
+**Do not**
 - Hold static mutable state, read process-global configuration, or write to the working directory from a library.
 - Throw from public APIs without documenting the exception types.
-- Expose third-party types in your public API unless you are prepared to version with them.
+- Expose third-party types in your public API, unless you accept their version changes.
 
 ---
 
 ## Native interop
 
 **Do**
-- Use **`[LibraryImport]`** (source-generated marshalling) instead of `[DllImport]` in new code. It is AOT-friendly and avoids runtime marshalling stubs.
+- Use **`[LibraryImport]`** (source-generated marshalling) instead of `[DllImport]` in new code. It works with AOT and does not need runtime marshalling stubs.
 
 ```csharp
 internal static partial class NativeMethods
@@ -240,14 +240,14 @@ internal static partial class NativeMethods
 }
 ```
 
-- Wrap native handles in a **`SafeHandle`** subclass. Never pass raw `IntPtr` handles around.
-- **Isolate interop** in an infrastructure adapter behind an interface, so the rest of the code (and the tests) never touch native code.
+- Wrap native handles in a **`SafeHandle`** subclass. Do not use raw `IntPtr` handles in other code.
+- **Isolate interop** in an infrastructure adapter behind an interface. Then the other code and the tests do not touch native code.
 - Translate native error codes into .NET exceptions or result types at the adapter boundary.
 - Document and enforce bitness/platform requirements (`RuntimeIdentifier`, `[SupportedOSPlatform("windows")]`).
 
-**Don't**
-- Let native types, error codes, or callbacks leak into domain or application code.
-- Call native code from multiple threads unless the vendor library is documented as thread-safe. Serialise access instead.
+**Do not**
+- Let native types, error codes, or callbacks go into domain or application code.
+- Call native code from multiple threads, unless the vendor documentation says that the library is thread-safe. Serialise access in other cases.
 
 ---
 
@@ -269,9 +269,9 @@ internal static partial class NativeMethods
 - Make tests deterministic: no `Thread.Sleep`, no real clocks, no shared mutable state, no ordering dependencies.
 - Run tests in CI on every PR, and collect coverage as a **signal** (find untested areas), not a target.
 
-**Don't**
+**Do not**
 - Test private methods directly. Test through the public behaviour.
-- Mock types you don't own (for example `SerialPort`). Wrap them in your own interface and mock that.
+- Mock types you do not own (for example `SerialPort`). Wrap them in your own interface and mock that.
 
 ---
 
@@ -282,21 +282,21 @@ internal static partial class NativeMethods
 - Validate all input at system boundaries: API requests, files, device responses, configuration.
 - Apply least privilege to service accounts, file system access, and network listeners (bind to `localhost` unless remote access is required).
 - Use the built-in cryptography APIs. Never write your own.
-- Sign assemblies and packages if your distribution requires it, with keys stored outside the repo.
+- Sign assemblies and packages if your distribution requires it. Keep the keys outside the repo.
 
-**Don't**
+**Do not**
 - Commit secrets, private keys, or credentials. Scan for them in CI.
-- Disable TLS validation, even "temporarily".
+- Turn off TLS validation, even for a short time.
 
 ---
 
 ## Review checklist
 
-- [ ] The project inherits `Directory.Build.props`; package versions are central; no binaries or `obj/`/`bin/` are committed.
-- [ ] Services use constructor injection, lifetimes are deliberate, there is no service locator or static singleton, and constructors do no I/O.
-- [ ] Configuration is bound to validated options (`ValidateOnStart`) and no secrets are in source.
+- [ ] The project inherits `Directory.Build.props`. Package versions are in one central file. The commit contains no binaries or `obj/`/`bin/`.
+- [ ] Services use constructor injection and carefully chosen lifetimes. There is no service locator or static singleton, and constructors do no I/O.
+- [ ] Configuration binds to validated options (`ValidateOnStart`), and the source contains no secrets.
 - [ ] Logging is structured (no interpolation), at the right level, and contains no sensitive data.
-- [ ] Background work uses `BackgroundService`/channels; time comes from `TimeProvider`; HTTP goes through `IHttpClientFactory` with resilience.
-- [ ] Public SDK API is minimal, documented, and tracked by PublicApiAnalyzers, and breaking changes bump the major version.
-- [ ] Native interop uses `LibraryImport` and `SafeHandle` and is isolated behind an interface.
-- [ ] New behaviour has tests that are deterministic and fast; integration tests cover the adapters.
+- [ ] Background work uses `BackgroundService`/channels. Time comes from `TimeProvider`. HTTP goes through `IHttpClientFactory` with resilience.
+- [ ] The public SDK API is minimal and documented, PublicApiAnalyzers tracks it, and breaking changes increase the major version.
+- [ ] Native interop uses `LibraryImport` and `SafeHandle`, and it stays behind an interface.
+- [ ] New behaviour has fast, deterministic tests. Integration tests cover the adapters.

@@ -26,7 +26,7 @@ internal sealed class ChatRouter(IEnumerable<IChatProvider> providers)
         {
             return Result<RoutedChat>.Fail(new EngineError(
                 ErrorKind.NotFound,
-                $"The provider '{model.Value.Provider}' is not available. Check its name, and that its API key is configured."));
+                $"The provider '{model.Value.Provider}' is not available. Check its name, and check that the configuration has its API key."));
         }
 
         var unsupported = command.Body.Select(field => field.Key).FirstOrDefault(name => !IsAccepted(provider, name));
@@ -34,7 +34,7 @@ internal sealed class ChatRouter(IEnumerable<IChatProvider> providers)
         {
             return Result<RoutedChat>.Fail(new EngineError(
                 ErrorKind.InvalidRequest,
-                $"The field '{unsupported}' is not supported by the provider '{provider.Name}'. Supported fields: model, stream, {string.Join(", ", provider.RequestFields)}."));
+                $"The provider '{provider.Name}' does not support the field '{unsupported}'. Supported fields: model, stream, {string.Join(", ", provider.RequestFields)}."));
         }
 
         return Result<RoutedChat>.Ok(new RoutedChat(provider, new ChatRequest(model.Value.Model, command.Body), model.Value));
@@ -43,7 +43,7 @@ internal sealed class ChatRouter(IEnumerable<IChatProvider> providers)
     /// <summary>Tells whether a provider accepts a field. Every provider accepts <c>model</c> and <c>stream</c>, because the engine needs them to route the request.</summary>
     /// <param name="provider">The selected provider.</param>
     /// <param name="name">The field's name.</param>
-    /// <returns><see langword="true"/> when the field can be forwarded.</returns>
+    /// <returns><see langword="true"/> when the engine can forward the field.</returns>
     private static bool IsAccepted(IChatProvider provider, string name) =>
         name is "model" or "stream" || provider.RequestFields.Contains(name, StringComparer.Ordinal);
 }

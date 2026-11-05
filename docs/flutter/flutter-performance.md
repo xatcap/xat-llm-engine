@@ -17,7 +17,7 @@ Knowing where time goes makes the rest of the page easier to follow.
 | **Paint** | UI thread | Render objects record drawing commands into layers | Repainting large areas every frame |
 | **Raster** | Raster thread | The engine (Impeller) turns layers into GPU work | Offscreen layers (`Opacity`, clips, blur), huge images |
 
-At 60 Hz each frame has **16 ms**; at 120 Hz it has **8 ms**. Both the UI thread and the raster thread must finish within that budget. A frame that misses it is dropped, and the user sees *jank*.
+At 60 Hz each frame has **16 ms**; at 120 Hz it has **8 ms**. Both the UI thread and the raster thread must finish within that budget. Flutter drops a frame that misses this limit, and the user sees *jank*.
 
 ---
 
@@ -41,9 +41,9 @@ final dishes = Timeline.timeSync('parseDishes', () => parseDishes(body));
 
 - Write the result of an investigation into the PR: device, before, after.
 
-**Don't**
+**Do not**
 - Judge performance in debug mode or on a simulator.
-- Optimise code you haven't measured. Most code is not on the hot path.
+- Optimise code you have not measured. Most code is not on the hot path.
 
 ---
 
@@ -52,7 +52,7 @@ final dishes = Timeline.timeSync('parseDishes', () => parseDishes(body));
 Rebuilds are cheap one at a time, but rebuilding a large subtree every frame adds up.
 
 **Do**
-- Use `const` constructors. A `const` widget is created once and Flutter skips rebuilding it.
+- Use `const` constructors. Flutter creates a `const` widget once and does not rebuild it.
 - **Push state down.** Put the changing part in its own small widget so only that widget rebuilds:
 
 ```dart
@@ -71,7 +71,7 @@ Widget build(BuildContext context) =>
 ```
 
 - Rebuild only on the state you use: `context.select`, `BlocSelector`, and `buildWhen` on `BlocBuilder` ([BLoC › Consuming blocs](./bloc-best-practices.md#consuming-blocs-in-widgets)).
-- Pass the static part of an animated tree as `child` to `AnimatedBuilder`, `ValueListenableBuilder`, or `ListenableBuilder`, so it is built once:
+- Pass the static part of an animated tree as `child` to `AnimatedBuilder`, `ValueListenableBuilder`, or `ListenableBuilder`, so that Flutter builds it once:
 
 ```dart
 AnimatedBuilder(
@@ -84,9 +84,9 @@ AnimatedBuilder(
 
 - Use `ValueNotifier` + `ValueListenableBuilder` for a single, local, purely visual value.
 
-**Don't**
+**Do not**
 - Call `setState` on a high-level widget for a change that only affects a leaf.
-- Create objects in `build` that could be created once (regular expressions, formatters, controllers, large lists).
+- Create objects in `build` if you can create them once (regular expressions, formatters, controllers, large lists).
 
 ---
 
@@ -98,7 +98,7 @@ AnimatedBuilder(
 - Combine different scrolling content (header, grid, list) in one `CustomScrollView` with slivers, instead of nesting scroll views.
 - Paginate long data sets; load the next page near the end of the list.
 
-**Don't**
+**Do not**
 - Use `shrinkWrap: true` on long lists, or put a `ListView` inside a `Column` inside a `SingleChildScrollView`. It lays out every item, even the invisible ones.
 - Use `ListView(children: [...])` for long or unbounded lists.
 
@@ -108,9 +108,9 @@ AnimatedBuilder(
 
 **Do**
 - Prefer widgets with simple, one-pass layout: `Row`, `Column`, `Stack`, `Padding`, `SizedBox`, `Align`.
-- Use `LayoutBuilder` when a widget needs to adapt to the space it is given, and `MediaQuery.sizeOf` when it needs the screen size.
+- Use `LayoutBuilder` when a widget must adapt to its available space, and `MediaQuery.sizeOf` when it needs the screen size.
 
-**Don't**
+**Do not**
 - Use `IntrinsicHeight` / `IntrinsicWidth` in lists or other hot paths. They lay out children twice, and nested intrinsics can grow much worse.
 - Nest many `Flexible`/`Expanded` levels where one `Row` with fixed sizes would do.
 
@@ -123,11 +123,11 @@ Some effects force the engine to draw into an **offscreen buffer** first and the
 **Do**
 - Fade with `FadeTransition` or `AnimatedOpacity`, not by animating an `Opacity` widget's value in `setState`.
 - For a single coloured shape or image, apply transparency to the colour (`color.withValues(alpha: 0.5)`) or use `Image(opacity: const AlwaysStoppedAnimation(0.5))` instead of wrapping it in `Opacity`.
-- Wrap a part that repaints often (an animation, a video, a progress indicator) in a `RepaintBoundary`, so the rest of the screen doesn't repaint with it. Check with `debugRepaintRainbowEnabled = true`: areas that change colour every frame are repainting.
+- Wrap a part that repaints often (an animation, a video, a progress indicator) in a `RepaintBoundary`. The other parts of the screen then do not repaint with it. Check with `debugRepaintRainbowEnabled = true`: areas that change colour every frame are repainting.
 - In a `CustomPainter`, make `shouldRepaint` return `true` only when the inputs really changed.
 - Prefer `Clip.hardEdge` (or no clip) over `Clip.antiAliasWithSaveLayer`.
 
-**Don't**
+**Do not**
 - Use `BackdropFilter`, `ShaderMask`, or `ColorFilter` over large or scrolling areas without measuring.
 - Add `RepaintBoundary` everywhere. Each one costs memory; add it where the repaint rainbow shows a benefit.
 
@@ -136,7 +136,7 @@ Some effects force the engine to draw into an **offscreen buffer** first and the
 ## Images
 
 **Do**
-- Decode images at the size they are displayed. A 4000×3000 photo shown as a 100×100 thumbnail still costs 48 MB of memory when decoded at full size:
+- Decode images at their display size. A 4000×3000 photo shown as a 100×100 thumbnail still costs 48 MB of memory when decoded at full size:
 
 ```dart
 // ✅ Decodes at about display size
@@ -147,11 +147,11 @@ Image.network(
 ```
 
 - Use `precacheImage` for images that must appear instantly on the next screen.
-- Use a disk cache (for example `cached_network_image`) for network images that are shown repeatedly.
+- Use a disk cache (for example `cached_network_image`) for network images that the app shows repeatedly.
 - Serve modern, compressed formats (WebP) from the backend, at sizes close to what the app needs.
 
-**Don't**
-- Embed images as base64 strings in JSON or models. They cost memory twice and can't be cached by the image cache.
+**Do not**
+- Embed images as base64 strings in JSON or models. They use memory twice, and the image cache cannot cache them.
 
 ---
 
@@ -163,7 +163,7 @@ Image.network(
 - Animate **transforms and opacity** (`Transform`, `FadeTransition`, `SlideTransition`, `ScaleTransition`). They skip layout. Animating `width`, `height`, or padding relayouts every frame.
 - Respect the system setting for reduced motion ([UI/UX › Motion](./flutter-ui-ux-guidelines.md#motion)).
 
-**Don't**
+**Do not**
 - Drive animations with `Timer` + `setState`.
 - Leave animations running on screens that are not visible. `TickerMode` pauses tickers in hidden subtrees (the navigator and `IndexedStack`-based shells do this for you).
 
@@ -178,7 +178,7 @@ The UI thread runs your Dart code. Anything that takes longer than a few millise
 - Confirm with the timeline: the work should disappear from the UI thread track.
 - For work that must stay on the main isolate, split it into chunks and yield between them (`await Future<void>.delayed(Duration.zero)`), so frames can render in between.
 
-**Don't**
+**Do not**
 - Send huge object graphs between isolates on every frame. Copying has a cost; send IDs or compact data.
 
 ---
@@ -189,9 +189,9 @@ The UI thread runs your Dart code. Anything that takes longer than a few millise
 - Measure with `flutter run --profile --trace-startup`, which writes the time to first frame into `build/start_up_info.json`.
 - Show the first frame as early as possible. Initialise only what the first screen needs before `runApp`, and start the rest after.
 - Initialise plugins and SDKs (analytics, crash reporting, remote config) lazily or in parallel with `Future.wait`.
-- Keep the native splash screen simple (`flutter_native_splash`) and don't add an extra Dart splash screen with a fixed delay.
+- Keep the native splash screen simple (`flutter_native_splash`) and do not add an extra Dart splash screen with a fixed delay.
 
-**Don't**
+**Do not**
 - `await` network calls before `runApp`.
 - Load large assets (JSON, databases) synchronously during startup.
 
@@ -206,7 +206,7 @@ The UI thread runs your Dart code. Anything that takes longer than a few millise
 - Compress and resize assets; remove unused ones and unused packages.
 - Use deferred imports (`import '...' deferred as feature;`) for rarely used, large features on web and Android (deferred components).
 
-**Don't**
+**Do not**
 - Bundle every icon font weight or every language of a large font when you use a few.
 
 ---
@@ -219,7 +219,7 @@ The UI thread runs your Dart code. Anything that takes longer than a few millise
 - Run widget tests with the leak tracker (`package:leak_tracker_flutter_testing`) to catch undisposed objects early.
 - Lower `PaintingBinding.instance.imageCache.maximumSizeBytes` on memory-constrained devices if images dominate memory.
 
-**Don't**
+**Do not**
 - Keep references to `BuildContext`, `State`, or widgets in long-lived objects (singletons, blocs, static fields). That keeps the whole screen in memory.
 
 ---
@@ -228,18 +228,18 @@ The UI thread runs your Dart code. Anything that takes longer than a few millise
 
 ### Impeller and shader jank
 
-Impeller is the default renderer on iOS, and on Android devices that support Vulkan. Older Android devices without Vulkan fall back to an OpenGL backend, so test on one if you support them. Impeller's shaders are precompiled when the Flutter engine is built, not when they are first used, so the "first-run jank" caused by shader compilation under the old Skia renderer is gone. Two consequences:
+Impeller is the default renderer on iOS, and on Android devices that support Vulkan. Older Android devices without Vulkan fall back to an OpenGL backend, so test on one if you support them. The Flutter engine build precompiles the Impeller shaders, so their first use does not compile them. Thus, the old Skia renderer's "first-run jank" from shader compilation does not occur. There are two consequences:
 
-- Don't spend time on SkSL shader warm-up for Impeller targets; it doesn't apply.
+- Do not spend time on SkSL shader warm-up for Impeller targets; it does not apply.
 - If you still see raster jank, look at offscreen layers, blur, clipping, and image size, using the raster thread track in DevTools.
 
 ### Fragment shaders
 
-For effects that would otherwise need many layers (gradients that animate, noise, ripples), write a GLSL fragment shader, declare it under `flutter: shaders:` in `pubspec.yaml`, and load it with `FragmentProgram.fromAsset`. One shader pass is usually cheaper than a stack of `ShaderMask` and `BackdropFilter` widgets.
+Some effects need many layers (gradients that animate, noise, ripples). For these effects, write a GLSL fragment shader, declare it under `flutter: shaders:` in `pubspec.yaml`, and load it with `FragmentProgram.fromAsset`. One shader pass is usually cheaper than a stack of `ShaderMask` and `BackdropFilter` widgets.
 
 ### Custom render objects
 
-When a layout can't be expressed efficiently with existing widgets (a chart, a timeline, a custom flow), write a `RenderBox` with `LeafRenderObjectWidget` or `MultiChildRenderObjectWidget`, or use `CustomPaint` / `Flow`. Rules:
+Existing widgets cannot do some layouts efficiently (a chart, a timeline, a custom flow). For these layouts, write a `RenderBox` with `LeafRenderObjectWidget` or `MultiChildRenderObjectWidget`, or use `CustomPaint` / `Flow`. Rules:
 
 - Call `markNeedsLayout` only when layout inputs change, and `markNeedsPaint` when only appearance changes.
 - Set `isRepaintBoundary` to `true` on render objects that repaint independently.
@@ -247,14 +247,14 @@ When a layout can't be expressed efficiently with existing widgets (a chart, a t
 
 ### Very large lists and tables
 
-- Use `SliverFixedExtentList` or `SliverVariedExtentList` when item heights are known up front; the list can then jump to any position without measuring items.
+- Use `SliverFixedExtentList` or `SliverVariedExtentList` when you know item heights before the list starts. The list can then go to any position and does not measure items.
 - Use the `two_dimensional_scrollables` package (`TableView`) for grids of up to a few thousand rows. It builds only the visible cells in both directions.
-- For logs with very many rows, use a vertical `ListView.builder` with a fixed `itemExtent`, placed inside a horizontal `SingleChildScrollView`, and keep the column header above the list. `TableView` walks every row when the table rebuilds or resizes. On a million-row table, that costs about a second per selection change. A fixed-extent list only builds the rows on screen.
+- For logs with very many rows, put a vertical `ListView.builder` with a fixed `itemExtent` inside a horizontal `SingleChildScrollView`. Keep the column header above the list. `TableView` walks every row when the table rebuilds or resizes. On a million-row table, that costs about a second per selection change. A fixed-extent list only builds the rows on screen.
 - Keep item widgets cheap: no `IntrinsicHeight`, no images decoded at full size, no per-item blocs unless the item really has independent logic.
 
 ### Platform views
 
-Embedding native views (maps, web views, native ads) has a real cost: the engine must compose native and Flutter content together, and on Android the composition mode affects both performance and correctness. Use them only where there is no Flutter alternative, avoid placing them in scrolling lists, and measure on the oldest Android version you support.
+Native views (maps, web views, native ads) have a real cost. The engine must compose native and Flutter content together. On Android, the composition mode affects both performance and correctness. Use native views only where there is no Flutter alternative. Do not put them in scrolling lists. Measure on the oldest Android version that you support.
 
 ### Web
 
@@ -270,7 +270,7 @@ For CPU-bound work that already exists as a C/C++/Rust library (codecs, compress
 
 | Technique | Builds hidden widget | Keeps its state | Cost |
 |-----------|----------------------|-----------------|------|
-| Don't include it in the tree | No | No | None |
+| Do not include it in the tree | No | No | None |
 | `Offstage` / `Visibility(maintainState: true)` | Yes | Yes | Memory, and build/layout when its inputs change |
 | `IndexedStack` | Yes (all children) | Yes | All tabs in memory at once |
 | `AutomaticKeepAliveClientMixin` in lists | Yes (kept items) | Yes | Memory per kept item |
@@ -290,7 +290,7 @@ void main() {
   final binding = IntegrationTestWidgetsFlutterBinding.ensureInitialized();
 
   testWidgets('menu scrolls smoothly', (tester) async {
-    // App as in BLoC › Dependency injection, with fakes so the network doesn't skew timings
+    // App as in BLoC › Dependency injection, with fakes so the network does not skew timings
     await tester.pumpWidget(App(
       dishRepository: FakeDishRepository(),
       orderRepository: InMemoryOrderRepository(),
@@ -309,13 +309,13 @@ Run it with `flutter drive --profile --driver=test_driver/perf_driver.dart --tar
 
 ## Review checklist
 
-- [ ] Performance claims are backed by profile-mode measurements on a real device.
-- [ ] `const` is used where possible; changing state lives in small widgets.
-- [ ] Blocs are consumed with `select` / `BlocSelector` / `buildWhen` where only part of the state matters.
-- [ ] Long lists use builder constructors, without `shrinkWrap`; fixed item sizes are declared when known.
-- [ ] No `IntrinsicHeight`/`IntrinsicWidth` in lists; no animated `Opacity`; blur and masks are measured.
-- [ ] Images are decoded near their display size.
+- [ ] Profile-mode measurements on a real device support performance claims.
+- [ ] Code uses `const` where possible. Changing state is in small widgets.
+- [ ] Code consumes blocs with `select` / `BlocSelector` / `buildWhen` where only part of the state is important.
+- [ ] Long lists use builder constructors, without `shrinkWrap`. Lists declare fixed item sizes when they are known.
+- [ ] No `IntrinsicHeight`/`IntrinsicWidth` in lists. No animated `Opacity`. Someone measured the cost of blur and masks.
+- [ ] Code decodes images near their display size.
 - [ ] Animations use transforms or opacity transitions and dispose their controllers.
 - [ ] Heavy synchronous work runs in an isolate.
-- [ ] Nothing slow is awaited before `runApp`.
+- [ ] The app does not await slow work before `runApp`.
 - [ ] No long-lived references to `BuildContext`, `State`, or widgets.

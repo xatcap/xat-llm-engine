@@ -28,8 +28,8 @@ public interface IChatProvider
     /// <param name="request">The validated request.</param>
     /// <param name="cancellationToken">Cancels generation, for example when the caller disconnects.</param>
     /// <returns>
-    /// The stream, or a failure if generation could not start. The result must be enumerated once so that the
-    /// connection is released. Failures during enumeration throw <see cref="ChatStreamException"/>.
+    /// The stream, or a failure if generation could not start. The caller must enumerate the result once, so that the
+    /// connection returns to the pool. Failures during enumeration throw <see cref="ChatStreamException"/>.
     /// </returns>
     Task<Result<IAsyncEnumerable<ChatChunk>>> StreamAsync(ChatRequest request, CancellationToken cancellationToken);
 }

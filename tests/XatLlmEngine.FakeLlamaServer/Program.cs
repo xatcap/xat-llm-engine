@@ -1,6 +1,6 @@
 using System.Globalization;
 
-// A stand-in for llama-server, so that process supervision can be tested without a real model on every platform.
+// A replacement for llama-server, so that tests can check process supervision without a real model on every platform.
 // It follows the real server's contract: the same arguments, the same environment variable for its key, and a /health
 // route that answers 503 while "loading". Extra arguments trigger the failure cases that the tests need.
 var settings = ParseArguments(args);

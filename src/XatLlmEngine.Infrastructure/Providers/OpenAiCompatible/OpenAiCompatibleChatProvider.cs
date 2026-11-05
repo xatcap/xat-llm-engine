@@ -5,7 +5,7 @@ namespace XatLlmEngine.Infrastructure.Providers.OpenAiCompatible;
 
 /// <summary>A cloud provider that speaks the OpenAI protocol, such as OpenAI itself or another compatible service.</summary>
 /// <param name="name">The provider's name.</param>
-/// <param name="options">The provider's settings. Its base URL and key must be set.</param>
+/// <param name="options">The provider's settings. These settings must include its base URL and key.</param>
 /// <param name="client">The protocol client.</param>
 internal sealed class OpenAiCompatibleChatProvider(string name, ProviderOptions options, OpenAiClient client) : IChatProvider
 {

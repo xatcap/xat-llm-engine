@@ -45,7 +45,7 @@ public class ListenAddressPolicyTests
         Assert.Throws<InvalidOperationException>(() => ListenAddressPolicy.EnsureAllowed(configuration));
     }
 
-    /// <summary>With a key, the network is allowed.</summary>
+    /// <summary>With a key, the policy allows the network.</summary>
     [Fact]
     public void EnsureAllowed_NetworkWithKey_Passes()
     {

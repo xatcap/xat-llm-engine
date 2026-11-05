@@ -32,7 +32,7 @@ internal static class ChatCompletionsEndpoint
         var cancellationToken = context.RequestAborted;
         try
         {
-            // JSON content is required because browsers cannot send it across sites without a CORS approval, which the engine never gives.
+            // The engine requires JSON content because browsers cannot send it across sites without a CORS approval, which the engine never gives.
             if (!context.Request.HasJsonContentType())
             {
                 return ErrorMapping.UnsupportedMediaType();
@@ -44,7 +44,7 @@ internal static class ChatCompletionsEndpoint
                 var node = await JsonNode.ParseAsync(context.Request.Body, cancellationToken: cancellationToken).ConfigureAwait(false);
                 body = node as JsonObject;
 
-                // JSON is checked only on first use, so problems would otherwise fail later as a 500 error, possibly after the provider was called.
+                // The JSON parser checks JSON only at first use. Without this check, a problem causes a later 500 error, possibly after the provider call.
                 ReadAll(body);
                 _ = body?.ToJsonString();
             }
@@ -127,9 +127,9 @@ internal static class ChatCompletionsEndpoint
 
     /// <summary>Produces a streamed answer.</summary>
     /// <remarks>
-    /// A failure before the first piece still returns a normal HTTP error, so the first piece is read before anything
-    /// is written. That also starts the stream, which guarantees its connection is released even if writing fails.
-    /// After that the status has been sent, so a failure becomes an error event, with no <c>[DONE]</c> marker.
+    /// A failure before the first piece still returns a normal HTTP error, so the engine reads the first piece before it writes
+    /// any data. That also starts the stream, which guarantees that its connection returns to the pool even if the write fails.
+    /// After that, the caller has the status, so a failure becomes an error event, with no <c>[DONE]</c> marker.
     /// </remarks>
     /// <param name="context">The current request.</param>
     /// <param name="handler">The use case.</param>
@@ -223,7 +223,7 @@ internal static class ChatCompletionsEndpoint
     /// <param name="value">The event's body.</param>
     /// <param name="typeInfo">The JSON metadata for the body.</param>
     /// <param name="cancellationToken">Stops writing when the caller disconnects.</param>
-    /// <returns>A task that completes when the event has been sent.</returns>
+    /// <returns>A task that completes after the engine sends the event.</returns>
     private static async Task WriteEventAsync<T>(HttpResponse response, T value, JsonTypeInfo<T> typeInfo, CancellationToken cancellationToken)
     {
         await response.WriteAsync($"data: {JsonSerializer.Serialize(value, typeInfo)}\n\n", cancellationToken).ConfigureAwait(false);

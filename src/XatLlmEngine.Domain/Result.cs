@@ -19,10 +19,10 @@ public sealed record Result<T>
         Error = error;
     }
 
-    /// <summary>Gets the value. It is set only when <see cref="IsSuccess"/> is <see langword="true"/>.</summary>
+    /// <summary>Gets the value. It has a value only when <see cref="IsSuccess"/> is <see langword="true"/>.</summary>
     public T? Value { get; }
 
-    /// <summary>Gets the failure. It is set only when <see cref="IsSuccess"/> is <see langword="false"/>.</summary>
+    /// <summary>Gets the failure. It has a value only when <see cref="IsSuccess"/> is <see langword="false"/>.</summary>
     public EngineError? Error { get; }
 
     /// <summary>Gets a value indicating whether the operation succeeded.</summary>

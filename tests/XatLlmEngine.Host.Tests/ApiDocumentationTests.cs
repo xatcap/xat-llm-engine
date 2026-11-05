@@ -8,7 +8,7 @@ namespace XatLlmEngine.Host.Tests;
 /// <summary>Tests that the API documentation exists while debugging, and only then.</summary>
 public class ApiDocumentationTests
 {
-    /// <summary>Swagger UI and its document are served in the Development environment.</summary>
+    /// <summary>The engine serves Swagger UI and its document in the Development environment.</summary>
     /// <param name="route">The route to request.</param>
     /// <returns>A task for the test.</returns>
     [Theory]

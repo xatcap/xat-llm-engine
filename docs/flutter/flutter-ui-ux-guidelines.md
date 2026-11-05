@@ -11,7 +11,7 @@ How our screens should look, behave, and feel, and how to build that in Flutter.
 | **Clarity** | Each screen has one main purpose. The most important action is the most visible one. |
 | **Consistency** | The same thing looks and behaves the same everywhere. Use the design system, not one-off styles. |
 | **Feedback** | Every action gets a visible response within 100 ms: a pressed state, a spinner, a message. |
-| **Forgiveness** | Destructive actions can be undone or are confirmed. Errors explain how to fix them. Input is never lost. |
+| **Forgiveness** | The user can undo or must confirm destructive actions. Errors explain how to fix them. Input is never lost. |
 | **Accessibility** | Usable with a screen reader, with large text, with a keyboard, and without relying on colour. |
 | **Respect for the platform** | Navigation, gestures, and system dialogs behave the way users of that platform expect. |
 
@@ -36,8 +36,8 @@ How our screens should look, behave, and feel, and how to build that in Flutter.
 - Use colour **roles**, not raw colours: a button uses `colorScheme.primary`, never "brand blue". This makes dark mode and high-contrast themes work automatically.
 - Provide both a **light and a dark theme**, and follow the system setting by default (`ThemeMode.system`).
 
-**Don't**
-- Introduce a new colour, font size, or spacing value in a feature. Add a token to the design system if it's really needed.
+**Do not**
+- Introduce a new colour, font size, or spacing value in a feature. If it is really necessary, add a token to the design system.
 - Style components individually where a component theme (`FilledButtonThemeData`, `InputDecorationTheme`, `CardThemeData`) can do it once.
 
 ---
@@ -55,7 +55,7 @@ Flutter draws every pixel itself, so it does not get platform behaviour for free
 - Use platform-appropriate icons where meaning differs (share, back arrow).
 - On desktop and web: support mouse hover states, right-click where useful, keyboard navigation, and resizable windows.
 
-**Don't**
+**Do not**
 - Build a fully custom look that ignores both Material and Cupertino conventions without a design reason.
 - Disable the system back gesture to "keep users in the flow".
 
@@ -75,9 +75,9 @@ Flutter draws every pixel itself, so it does not get platform behaviour for free
   | Expanded | 840–1199 dp | `NavigationRail` or drawer | List–detail side by side |
   | Large / extra-large | ≥ 1200 dp | Permanent navigation drawer | Multi-pane, max content width |
 
-- Decide layout from the **space the widget gets** (`LayoutBuilder`), and screen-level structure from the window size (`MediaQuery.sizeOf`). Don't decide by device type ("is tablet").
+- Decide layout from the **space the widget gets** (`LayoutBuilder`), and screen-level structure from the window size (`MediaQuery.sizeOf`). Do not decide by device type ("is tablet").
 - Limit reading width to about 600–700 dp for text-heavy content; centre it on wide screens.
-- Wrap content in `SafeArea` (or use `Scaffold`, which handles most insets) so it doesn't sit under notches, the status bar, or the home indicator.
+- Wrap content in `SafeArea` (or use `Scaffold`, which handles most insets) so it does not sit under notches, the status bar, or the home indicator.
 - Support both orientations unless there is a real reason not to, and keep state when the device rotates or the window resizes.
 
 ```dart
@@ -109,7 +109,7 @@ class DishGrid extends StatelessWidget {
 }
 ```
 
-**Don't**
+**Do not**
 - Use fixed pixel widths and heights for containers that hold text or that should grow.
 - Check `Platform.isAndroid` to decide layout. Platform and screen size are different questions.
 
@@ -118,11 +118,11 @@ class DishGrid extends StatelessWidget {
 ## Touch targets and spacing
 
 **Do**
-- Make every interactive element at least **48×48 dp** (Material). iOS asks for at least 44×44 pt. Material buttons already meet 48 dp through `materialTapTargetSize`; custom `GestureDetector`s don't.
+- Make every interactive element at least **48×48 dp** (Material). iOS asks for at least 44×44 pt. Material buttons already meet 48 dp through `materialTapTargetSize`; custom `GestureDetector`s do not.
 - Leave at least 8 dp between adjacent targets.
 - Put primary actions where thumbs reach on phones (bottom half of the screen).
 
-**Don't**
+**Do not**
 - Make small icons tappable without padding around them. Use `IconButton`, which provides the target size and a tooltip.
 
 ---
@@ -136,8 +136,8 @@ class DishGrid extends StatelessWidget {
 - Let text containers grow: use `minHeight` constraints instead of fixed heights, and allow wrapping instead of `maxLines: 1` for important content.
 - Use `overflow: TextOverflow.ellipsis` only for secondary text where the full value is available elsewhere.
 
-**Don't**
-- Clamp or disable text scaling app-wide. If one layout really can't handle large text, fix that layout.
+**Do not**
+- Clamp or disable text scaling app-wide. If one layout really cannot handle large text, fix that layout.
 - Put text in images.
 
 ---
@@ -147,12 +147,12 @@ class DishGrid extends StatelessWidget {
 **Do**
 - Meet WCAG 2.2 AA contrast:
   - **4.5 : 1** for normal text.
-  - **3 : 1** for large text (about 18 pt regular or 14 pt bold and above) and for UI parts such as input borders, icons, and focus indicators.
+  - **3 : 1** for large text (about 18 pt regular or 14 pt bold and above). This limit also applies to UI parts such as input borders, icons, and focus indicators.
 - Check both light and dark themes.
 - Use `colorScheme.outline` for control borders. It must reach 3 : 1 against the surface. Use `colorScheme.outlineVariant` for dividers.
 - Pair colour with another signal: an icon, a label, or a pattern. An error is red **and** has an error icon and text.
 
-**Don't**
+**Do not**
 - Use colour alone to show status, selection, or validation.
 - Put text on photos without a scrim or a solid background behind it.
 
@@ -165,7 +165,7 @@ class DishGrid extends StatelessWidget {
 - Mark decorative images as excluded: `Image.asset(..., excludeFromSemantics: true)`.
 - Merge related pieces into one announcement with `MergeSemantics` (for example a list tile with title, subtitle, and price).
 - Keep a logical focus order; support keyboard and switch access (`Focus`, `FocusTraversalGroup`, `Shortcuts`, `Actions`). Every interactive element must show a visible focus state.
-- Announce important changes that aren't otherwise visible to screen readers (for example "Order placed") using `SemanticsService.sendAnnouncement(View.of(context), 'Order placed', Directionality.of(context))` or a live region (`Semantics(liveRegion: true)`). `SemanticsService` comes from `package:flutter/semantics.dart`, which `material.dart` doesn't export. The older `SemanticsService.announce` is deprecated.
+- Announce important changes that are not otherwise visible to screen readers (for example "Order placed") using `SemanticsService.sendAnnouncement(View.of(context), 'Order placed', Directionality.of(context))` or a live region (`Semantics(liveRegion: true)`). `SemanticsService` comes from `package:flutter/semantics.dart`, which `material.dart` does not export. Do not use the older `SemanticsService.announce`, because it is deprecated.
 - Test with TalkBack (Android) and VoiceOver (iOS/macOS) before release.
 - Check guidelines automatically in widget tests:
 
@@ -186,9 +186,9 @@ testWidgets('menu page meets accessibility guidelines', (tester) async {
 });
 ```
 
-**Don't**
+**Do not**
 - Rely on gestures alone (swipe to delete, long press) for an action. Offer a visible alternative such as a menu item.
-- Use time limits that the user can't extend.
+- Use time limits that the user cannot extend.
 
 ---
 
@@ -198,17 +198,17 @@ Every screen that loads data has at least four states. Design all of them, not o
 
 | State | Show | Avoid |
 |-------|------|-------|
-| **Loading** | Skeleton placeholders shaped like the content for content screens; a small progress indicator for short actions. Delay showing it by about 200–300 ms so fast responses don't flicker. | Full-screen spinners that hide content the user already has. |
-| **Empty** | What would be here, why it's empty, and the action that fills it ("No bookings yet. Book a table"). | A blank screen. |
-| **Error** | What went wrong in plain words, and a way forward: **Retry**, edit the input, or contact support. Keep data that's already loaded visible. | Raw exception text, error codes without explanation, dead ends. |
-| **Success** | Confirmation that matches the weight of the action: a snackbar for small actions, a dedicated screen for big ones (a booking with its token). | Silent success, where the user can't tell whether it worked. |
+| **Loading** | Skeleton placeholders shaped like the content for content screens; a small progress indicator for short actions. Delay showing it by about 200–300 ms so fast responses do not flicker. | Full-screen spinners that hide content the user already has. |
+| **Empty** | What would be here, why it is empty, and the action that fills it ("No bookings yet. Book a table"). | A blank screen. |
+| **Error** | What went wrong in plain words, and a way forward: **Retry**, edit the input, or contact support. Keep data that is already loaded visible. | Raw exception text, error codes without explanation, dead ends. |
+| **Success** | Confirmation that matches the weight of the action: a snackbar for small actions, a dedicated screen for big ones (a booking with its token). | Silent success, where the user cannot tell whether it worked. |
 
 **Do**
 - Show **optimistic updates** for quick, likely-to-succeed actions (favourites, toggles), and roll back with a message if the server rejects them.
 - Disable a submit button while its request runs, and show progress on the button itself.
 - Use snackbars with an **Undo** action instead of confirmation dialogs for reversible actions.
 
-**Don't**
+**Do not**
 - Block the whole UI with a modal dialog for background work.
 - Lose scroll position or form input when a refresh fails.
 
@@ -220,14 +220,14 @@ Every screen that loads data has at least four states. Design all of them, not o
 - Set the right keyboard and actions: `keyboardType: TextInputType.emailAddress`, `textInputAction: TextInputAction.next`, and `onFieldSubmitted` to move focus.
 - Enable autofill with `autofillHints` (`AutofillHints.email`, `AutofillHints.newPassword`) inside an `AutofillGroup`.
 - Keep labels visible (floating `labelText`), not placeholder-only fields.
-- Validate when the user leaves a field or submits, then re-validate **while typing** once a field has shown an error, so the error clears as soon as it's fixed.
+- Validate when the user leaves a field or submits. After a field shows an error, validate again **during typing**. The error then clears immediately after the user corrects it.
 - Write error messages that say how to fix the problem: "Enter an email like name@example.com", not "Invalid input".
 - Keep the focused field visible above the keyboard (`Scaffold` does this; check custom layouts).
 - Put validation rules in the bloc/cubit, not in the widget ([BLoC › Forms](./bloc-best-practices.md#forms-and-validation)).
 
-**Don't**
+**Do not**
 - Clear the user's input when validation fails.
-- Disable the submit button without explaining what's missing. Either keep it enabled and show errors on press, or show what's needed next to it.
+- Turn off the submit button without an explanation of what is missing. Keep it on and show errors on press, or show what is necessary next to it.
 
 ---
 
@@ -238,7 +238,7 @@ Every screen that loads data has at least four states. Design all of them, not o
 - Keep durations short: 100–200 ms for small elements and state changes, 250–400 ms for screen transitions. Use standard easing curves (`Curves.easeInOutCubicEmphasized` or the `ui_kit` motion tokens).
 - Respect reduced motion. When `MediaQuery.disableAnimationsOf(context)` is `true`, replace movement with instant changes or simple fades.
 
-**Don't**
+**Do not**
 - Animate for decoration on every screen.
 - Use animations that flash more than three times per second.
 
@@ -249,10 +249,10 @@ Every screen that loads data has at least four states. Design all of them, not o
 **Do**
 - Make the current location obvious: the selected tab, the page title, breadcrumbs on wide layouts.
 - Keep each tab's stack and scroll position when switching tabs.
-- Make every important screen reachable by a **deep link**, and make back from a deep link go somewhere sensible (the parent screen, not out of the app).
+- Make every important screen available through a **deep link**. From a deep link, make the back action go to a sensible place (the parent screen, not out of the app).
 - Ask before discarding unsaved changes on back.
 
-**Don't**
+**Do not**
 - Use more than five destinations in a bottom navigation bar.
 - Hide primary navigation behind a hamburger menu on phones when there are only a few destinations.
 
@@ -263,17 +263,17 @@ Every screen that loads data has at least four states. Design all of them, not o
 **Do**
 - Leave room for longer text: German and Finnish strings are often 30–40 % longer than English.
 - Use direction-aware widgets so layouts mirror in right-to-left languages: `EdgeInsetsDirectional`, `AlignmentDirectional`, `PositionedDirectional`, and `start`/`end` instead of `left`/`right`.
-- Mirror directional icons (back, forward) in right-to-left; don't mirror icons like clocks or media play.
+- Mirror directional icons (back, forward) in right-to-left; do not mirror icons like clocks or media play.
 - Format dates, times, numbers, and currencies for the user's locale (`package:intl`).
 
-**Don't**
+**Do not**
 - Assume a fixed date format, decimal separator, or first day of the week.
 
 ---
 
 ## Review checklist
 
-- [ ] Only design tokens (theme colours, text styles, spacing) are used; no one-off styles.
+- [ ] Code uses only design tokens (theme colours, text styles, spacing). There are no one-off styles.
 - [ ] Works in light and dark themes, at 200 % text scale, and in compact and expanded widths.
 - [ ] Interactive elements are at least 48×48 dp and have semantics labels.
 - [ ] Contrast meets 4.5 : 1 for text and 3 : 1 for UI parts; colour is never the only signal.

@@ -12,7 +12,7 @@ namespace XatLlmEngine.Infrastructure.Providers.OpenAiCompatible;
 
 /// <summary>Speaks the OpenAI chat completions protocol. Cloud services and the local llama-server share this code.</summary>
 /// <param name="providerName">The provider's name, for error messages.</param>
-/// <param name="httpClientFactory">Creates HTTP clients, so that connections are pooled properly.</param>
+/// <param name="httpClientFactory">Creates HTTP clients, so that the connection pool works correctly.</param>
 /// <param name="httpClientName">The named client, which carries the provider's resilience settings.</param>
 internal sealed class OpenAiClient(
     string providerName,
@@ -104,7 +104,7 @@ internal sealed class OpenAiClient(
 
     /// <summary>Converts token counts.</summary>
     /// <param name="usage">The wire value.</param>
-    /// <returns>The engine's counts, or <see langword="null"/> when none were sent.</returns>
+    /// <returns>The engine's counts, or <see langword="null"/> when the provider sent none.</returns>
     private static TokenUsage? ToUsage(OpenAiUsage? usage) =>
         usage is null ? null : new TokenUsage(usage.PromptTokens, usage.CompletionTokens);
 
@@ -181,7 +181,7 @@ internal sealed class OpenAiClient(
     /// <param name="data">The event's JSON text.</param>
     /// <param name="includeUsage">Whether to keep token counts.</param>
     /// <returns>A chunk, or <see langword="null"/> when the event carries nothing useful, such as a role-only delta.</returns>
-    /// <exception cref="ChatStreamException">The event reports an error or cannot be read.</exception>
+    /// <exception cref="ChatStreamException">The event reports an error, or the engine cannot read it.</exception>
     private ChatChunk? Parse(string data, bool includeUsage)
     {
         OpenAiChatResponse? body;
@@ -196,7 +196,7 @@ internal sealed class OpenAiClient(
 
         if (body?.Error is not null)
         {
-            throw new ChatStreamException(new EngineError(ErrorKind.Upstream, $"The provider '{providerName}' failed while streaming."));
+            throw new ChatStreamException(new EngineError(ErrorKind.Upstream, $"The provider '{providerName}' failed during the stream."));
         }
 
         var choice = body?.Choices is [var first, ..] ? first : null;

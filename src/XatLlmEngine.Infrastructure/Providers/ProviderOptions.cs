@@ -21,7 +21,7 @@ public sealed class ProviderOptions
     /// <summary>Gets the model names to advertise. Callers can also request names not listed here.</summary>
     public IReadOnlyList<string> Models { get; init; } = [];
 
-    /// <summary>Gets the request fields this provider accepts, besides <c>model</c> and <c>stream</c>. This list is its request template, so a vendor's new field needs only a change here.</summary>
+    /// <summary>Gets the request fields this provider accepts, in addition to <c>model</c> and <c>stream</c>. This list is its request template. A new vendor field needs a change only here.</summary>
     [MinLength(1, ErrorMessage = "RequestFields must list at least one field.")]
     public IReadOnlyList<string> RequestFields { get; init; } = [];
 
@@ -29,11 +29,11 @@ public sealed class ProviderOptions
     [Range(1, int.MaxValue)]
     public int DefaultMaxTokens { get; init; } = 4096;
 
-    /// <summary>Gets how long to wait for a provider to begin responding, in seconds, across all retries. A non-streaming answer only begins when it is complete, so this must be generous.</summary>
+    /// <summary>Gets how long to wait for the start of a provider's response, in seconds, across all retries. A non-streaming answer starts only when it is complete, so make this time long.</summary>
     [Range(1, 86_400)]
     public int RequestTimeoutSeconds { get; init; } = 600;
 
-    /// <summary>Gets how many times to retry when a provider returns a 429 or 5xx status or cannot be reached. Retries only happen before a response starts.</summary>
+    /// <summary>Gets how many retries to do when a provider returns a 429 or 5xx status, or when the engine cannot reach it. Retries occur only before a response starts.</summary>
     [Range(0, 10)]
     public int MaxRetries { get; init; } = 2;
 }

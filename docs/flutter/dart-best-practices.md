@@ -19,12 +19,12 @@ Language-level guidance for Dart 3.12. For framework concerns (widgets, navigati
 
 - Treat acronyms longer than two letters like words: `HttpClient`, `JsonParser`, `userId`, not `HTTPClient` or `userID`.
 - Name booleans as questions or states: `isEmpty`, `hasError`, `canSubmit`.
-- Use domain vocabulary consistently. If the business calls it a *booking*, don't call it a *reservation* elsewhere.
-- Run `dart format` and let CI fail when the code is not formatted. Since Dart 3.7 the formatter decides trailing commas too, so don't argue about them in reviews.
+- Use domain vocabulary consistently. If the business calls it a *booking*, do not call it a *reservation* elsewhere.
+- Run `dart format` and let CI fail when the code is not formatted. Since Dart 3.7 the formatter decides trailing commas too, so do not argue about them in reviews.
 
-**Don't**
+**Do not**
 - Use a `k` prefix for constants (`kMaxItems`). Use `maxItems`.
-- Use Hungarian notation or abbreviations that aren't universally known.
+- Use Hungarian notation or abbreviations that are not universally known.
 - Suffix every class with `Impl`. Name the implementation after what makes it different: `HttpDishRepository`, `FakeDishRepository`.
 
 ---
@@ -60,7 +60,7 @@ linter:
 
 - Keep the analyzer at **zero warnings**. A warning that everyone ignores hides the next real one.
 
-**Don't**
+**Do not**
 - Silence a lint with `// ignore:` without a comment that explains why.
 
 **Why:** The strict modes turn silent `dynamic` holes into compile errors. `strict-casts` alone catches most "worked in debug, crashed in production" JSON bugs.
@@ -82,7 +82,7 @@ export 'src/order_repository.dart' show OrderRepository;
 
 - Keep one public top-level type per file, named after the file. Small private helpers may live in the same file. Sealed hierarchies are the exception: a sealed class and its subtypes must be in the same library, so they share one file.
 
-**Don't**
+**Do not**
 - Import another package's `src/` folder (`package:orders/src/...`). It is private by convention, and the lint `implementation_imports` flags it.
 - Use `part` / `part of` for hand-written code. Use it only for generated code (`*.g.dart`, `*.freezed.dart`).
 
@@ -92,7 +92,7 @@ export 'src/order_repository.dart' show OrderRepository;
 
 **Do**
 - Annotate the types of public APIs: fields, parameters, return types, and top-level variables.
-- Use `final` for locals that are not reassigned, and let the type be inferred: `final orders = <Order>[];`.
+- Use `final` for locals that you do not reassign, and let Dart infer the type: `final orders = <Order>[];`.
 - Use `const` for values known at compile time.
 - Use `Object?` when you truly accept anything, and narrow it with pattern matching.
 
@@ -107,7 +107,7 @@ int parseId(Map<String, Object?> json) => switch (json['id']) {
 };
 ```
 
-**Don't**
+**Do not**
 - Use `dynamic` except at real interop boundaries, and convert it to a typed value immediately.
 - Use `var` for fields. Fields are either `final` or have an explicit type.
 - Write `as` casts to make the compiler quiet. A failed `as` is a runtime crash. Use a pattern or an `is` check instead.
@@ -118,9 +118,9 @@ int parseId(Map<String, Object?> json) => switch (json['id']) {
 
 **Do**
 - Make "might be absent" explicit with `T?`, and handle it where the value enters the program.
-- Use `required` for named parameters that must be supplied.
+- Use `required` for named parameters that callers must supply.
 - Use `?.`, `??`, and `??=` to handle absent values concisely.
-- Promote nullable locals with a check or a pattern. Copy a nullable field into a local first, because fields don't promote:
+- Promote nullable locals with a check or a pattern. Copy a nullable field into a local first, because fields do not promote:
 
 ```dart
 // ✅
@@ -132,9 +132,9 @@ greet(user.name);
 if (_user case final user?) greet(user.name);
 ```
 
-**Don't**
-- Use the `!` operator unless you can prove the value is non-null and the compiler can't. Leave a comment when you use it.
-- Use `late` to dodge initialisation. `late` is fine when a value is set in `initState` or a constructor body before use. Elsewhere it moves a compile error to a runtime crash.
+**Do not**
+- Use the `!` operator unless you can prove the value is non-null and the compiler cannot. Leave a comment when you use it.
+- Use `late` to avoid initialisation. `late` is correct when `initState` or a constructor body sets the value before use. In other places, it changes a compile error into a runtime crash.
 - Return `null` for collections. Return an empty collection.
 
 ---
@@ -148,7 +148,7 @@ if (_user case final user?) greet(user.name);
   | Approach | Good for | Notes |
   |----------|----------|-------|
   | Records `(int, String)` / `({int id, String name})` | Small, local tuples | Built-in value equality. No methods, no names for the type. |
-  | `package:equatable` | Hand-written models and bloc states | List `props`; collections inside are compared deeply. |
+  | `package:equatable` | Hand-written models and bloc states | List `props`. It makes a deep comparison of collections inside. |
   | `package:freezed` | Larger models, unions, JSON | Generates `==`, `hashCode`, `copyWith`, `toString`, JSON. Adds a build step. |
   | Hand-written `==` / `hashCode` | Hot paths, no dependencies | Always override both together. Use `Object.hash`. |
 
@@ -171,11 +171,11 @@ final class Order extends Equatable {
 }
 ```
 
-**Don't**
+**Do not**
 - Mutate an object and emit or return the same instance as "new". Code that compares old and new (blocs, `shouldRepaint`, `didUpdateWidget`) will see no change. See [BLoC › States](./bloc-best-practices.md#states).
 - Override `==` without `hashCode`, or base equality on mutable fields.
 
-**Why:** Immutable objects can't be changed behind your back, so functions that receive them have no hidden side effects, and an object that was valid when created stays valid. Value equality matches how people think about data: two bookings with the same token are the same booking, wherever they live in memory.
+**Why:** Other code cannot change an immutable object, so functions that receive it have no hidden side effects. An object that was valid at creation stays valid. Value equality matches how people think about data: two bookings with the same token are the same booking, at any memory location.
 
 ---
 
@@ -212,15 +212,15 @@ if (json case {'id': final int id, 'name': final String name}) {
 throw FormatException('Invalid dish: $json');
 ```
 
-**Don't**
-- Add a `default` / `_` branch to a `switch` over a sealed type. It hides the compile error you want when a new case is added.
+**Do not**
+- Add a `default` / `_` branch to a `switch` over a sealed type. It hides the compile error that you want when you add a new case.
 - Use records for public data that has meaning in the domain. A named class documents itself and can grow methods.
 
 ---
 
 ## Class modifiers
 
-Dart 3 class modifiers say how a class may be used outside its library.
+Dart 3 class modifiers tell how other libraries can use a class.
 
 | Modifier | Outside the library you can... | Use it for |
 |----------|-------------------------------|------------|
@@ -232,7 +232,7 @@ Dart 3 class modifiers say how a class may be used outside its library.
 | `mixin class` | Use as both a class and a mixin | Rare. |
 
 **Do**
-- Mark public concrete classes in packages `final` unless extension is an intended feature. Exception: classes that tests in other libraries must mock or fake (blocs, use cases). A `final` class can't be implemented outside its library, so `class MockDishBloc extends MockBloc<...> implements DishBloc` would not compile. Leave those without a modifier.
+- Mark public concrete classes in packages `final` unless extension is an intended feature. Exception: classes that tests in other libraries must mock or fake (blocs, use cases). Other libraries cannot implement a `final` class, so `class MockDishBloc extends MockBloc<...> implements DishBloc` does not compile. Do not add a modifier to those classes.
 - Declare repository contracts as `abstract interface class`.
 
 **Why:** It is the same reasoning as sealing classes in C#. A class that nobody outside can extend is cheaper to change.
@@ -242,7 +242,7 @@ Dart 3 class modifiers say how a class may be used outside its library.
 ## Extension methods and extension types
 
 **Do**
-- Use extension methods to add small, obvious helpers to types you don't own: `extension on DateTime { bool get isWeekend => ... }`.
+- Use extension methods to add small, obvious helpers to types you do not own: `extension on DateTime { bool get isWeekend => ... }`.
 - Use **extension types** to give a primitive a domain meaning at zero runtime cost:
 
 ```dart
@@ -253,7 +253,7 @@ extension type const DishId(int value) {}
 Future<void> placeOrder(BookingToken token, List<DishId> dishes) async {}
 ```
 
-**Don't**
+**Do not**
 - Hide business logic in extensions on `String` or `Map`. If the behaviour belongs to a concept, give the concept a class.
 - Treat an extension type as a security boundary. It can be cast back to its underlying type.
 
@@ -278,7 +278,7 @@ final items = [
 - Use `whereType<T>()` to filter by type, and `firstOrNull` / `lastOrNull` (built into the core library since Dart 3) instead of `try { first } catch`.
 - Remember that `where`, `map`, and friends return **lazy** iterables. Call `toList()` once if you iterate more than once.
 
-**Don't**
+**Do not**
 - Use `forEach` with a function literal. Use a `for` loop, which also allows `await`, `break`, and `return`.
 - Iterate a lazy iterable inside a loop body or a `build` method repeatedly.
 
@@ -287,7 +287,7 @@ final items = [
 ## Error handling
 
 **Do**
-- Throw `Exception` subtypes for failures the caller is expected to handle (network down, invalid input). Throw `Error` subtypes (`ArgumentError`, `StateError`) for programmer mistakes.
+- Throw `Exception` subtypes for failures that the caller must handle (network down, invalid input). Throw `Error` subtypes (`ArgumentError`, `StateError`) for programmer mistakes.
 - Define specific exception types per boundary (`DishSearchException`, `ApiTimeoutException`) and catch them by type with `on`:
 
 ```dart
@@ -304,7 +304,7 @@ try {
 - Use `rethrow` to keep the original stack trace.
 - Validate arguments of public APIs at the start of the function.
 
-**Don't**
+**Do not**
 - Catch `Error` (or use a bare `catch`) to keep the app running. An `Error` means the code is wrong.
 - Throw strings or maps. Throw typed objects.
 - Swallow exceptions without logging. If you deliberately ignore one, comment why.
@@ -315,7 +315,7 @@ try {
 
 **Do**
 - Use `async` / `await` rather than chains of `.then()`.
-- Await every `Future` or mark it explicitly with `unawaited(...)` when fire-and-forget is intended. The `unawaited_futures` and `discarded_futures` lints enforce this.
+- Await every `Future`. If you do not want to wait for it, mark it explicitly with `unawaited(...)`. The `unawaited_futures` and `discarded_futures` lints enforce this.
 - Run independent work in parallel:
 
 ```dart
@@ -327,8 +327,8 @@ final (menu, bookings) = await (repo.fetchMenu(), repo.fetchBookings()).wait;
 - Cancel every `StreamSubscription` you create, in `dispose` / `close`.
 - Prefer `await for` for consuming a stream inside an async function, and `async*` / `yield` for producing one.
 
-**Don't**
-- Make a function `async` and return `void`. Return `Future<void>` so callers can await it and errors aren't lost.
+**Do not**
+- Make a function `async` and return `void`. Return `Future<void>` so callers can await it and errors are not lost.
 - Use `Future.delayed` to "wait until something is ready". Wait for the actual signal.
 - Expose a `StreamController` publicly. Expose `controller.stream` and keep the controller private.
 
@@ -348,7 +348,7 @@ final dishes = await Isolate.run(() => parseDishes(responseBody));
 - Pass small, plain data into and out of isolates. Copying large object graphs costs time too.
 - Use a long-lived isolate with ports only when you send many messages (for example a background parser).
 
-**Don't**
+**Do not**
 - Spawn an isolate for work that takes less than a few milliseconds. The startup cost is larger than the saving.
 
 See [Performance › Isolates](./flutter-performance.md#isolates-and-heavy-work) for how to measure this.
@@ -363,7 +363,7 @@ See [Performance › Isolates](./flutter-performance.md#isolates-and-heavy-work)
 - Explain *why* and *when*, not what the next line literally does.
 - Document thrown exceptions and side effects.
 
-**Don't**
+**Do not**
 - Use `/** */` block doc comments.
 - Leave commented-out code. Git remembers it.
 
@@ -377,7 +377,7 @@ See [Performance › Isolates](./flutter-performance.md#isolates-and-heavy-work)
 - Prefer **fakes** (small hand-written implementations of an interface) over mocks when the contract is simple. Use `package:mocktail` when you need to verify interactions.
 - Keep tests deterministic: inject clocks, random sources, and IDs instead of calling `DateTime.now()` inside logic.
 
-**Don't**
+**Do not**
 - Test private members. Test through the public API.
 - Share mutable state between tests. Use `setUp` to build fresh objects.
 
@@ -391,7 +391,7 @@ See [Performance › Isolates](./flutter-performance.md#isolates-and-heavy-work)
 - [ ] Closed sets of alternatives are `sealed`, and switches over them have no catch-all branch.
 - [ ] Public concrete classes in packages are `final`; contracts are `abstract interface class`.
 - [ ] No imports from another package's `src/`.
-- [ ] Every `Future` is awaited or explicitly `unawaited`; every subscription is cancelled.
-- [ ] Exceptions are typed and caught by type; no bare `catch` that hides errors.
+- [ ] Code awaits every `Future` or marks it `unawaited`. Code cancels every subscription.
+- [ ] Exceptions have types, and code catches them by type. No bare `catch` hides errors.
 - [ ] Heavy synchronous work runs in an isolate.
 - [ ] Public APIs have `///` doc comments.

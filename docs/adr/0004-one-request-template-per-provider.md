@@ -8,7 +8,7 @@
 
 The engine used one request format for every provider. A setting that only one vendor needed meant a change to shared code, and every provider used that code.
 
-Fields that the engine did not know were silently dropped. ADR 0002 says that unsupported features return a 400 error instead.
+The engine silently removed fields that it did not know. ADR 0002 says that unsupported features return a 400 error instead.
 
 ## Decision
 

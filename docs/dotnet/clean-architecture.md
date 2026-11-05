@@ -1,6 +1,6 @@
 # Clean Architecture
 
-How we apply Clean Architecture (also known as Ports and Adapters, Hexagonal, or Onion) in .NET 10. The underlying principles are covered in [Architecture Principles](./architecture-principles.md) and [SOLID › DIP](./solid-principles.md#dependency-inversion-principle-dip).
+This page describes how we apply Clean Architecture (also known as Ports and Adapters, Hexagonal, or Onion) in .NET 10. [Architecture Principles](./architecture-principles.md) and [SOLID › DIP](./solid-principles.md#dependency-inversion-principle-dip) cover the principles.
 
 ---
 
@@ -30,7 +30,7 @@ flowchart LR
 - **Domain** depends on nothing (only the BCL).
 - **Application** depends on Domain. It defines **ports** (interfaces) for everything it needs from the outside world.
 - **Infrastructure** depends on Application (and Domain), and **implements** the ports as adapters.
-- **Host** references everything, but only to **compose** the application: DI registration, configuration, and starting up.
+- **Host** references everything, but only to **compose** the application: DI registration, configuration, and startup.
 
 Data crosses boundaries as simple structures (DTOs, records). Inner layers never receive outer-layer types such as `HttpContext`, `DbContext`, `SerialPort`, or vendor classes.
 
@@ -40,7 +40,7 @@ Data crosses boundaries as simple structures (DTOs, records). Inner layers never
 
 ### Domain
 
-**Contains:** entities (identity and lifecycle), value objects (immutable and validated), domain events, domain services (logic that doesn't belong to one entity), domain errors, and enumerations.
+**Contains:** entities (identity and lifecycle), value objects (immutable and validated), domain events, domain services (logic that does not belong to one entity), domain errors, and enumerations.
 
 **Rules**
 - Pure C#, with no I/O, no framework references, no logging, and no DI attributes.
@@ -68,14 +68,14 @@ public sealed record Offset
 **Rules**
 - One use case per class, organised **by feature** (`Features/Calibrate/`, `Features/Stamp/`), not by technical type.
 - Depends only on Domain and on abstraction packages (`Microsoft.Extensions.Logging.Abstractions`, `Microsoft.Extensions.Options`).
-- Ports are shaped by **what the use case needs**, in domain language, not by what a vendor API offers ([ISP](./solid-principles.md#interface-segregation-principle-isp)).
+- Give ports the shape of **what the use case needs**, in domain language, not the shape of what a vendor API offers ([ISP](./solid-principles.md#interface-segregation-principle-isp)).
 
 ### Infrastructure
 
 **Contains:** adapters that implement ports: database access, serial/USB/network device drivers, native interop, HTTP clients, file storage, message brokers, and resilience policies.
 
 **Rules**
-- Adapter classes are `internal sealed`, and are exposed only through the ports they implement and a registration extension method.
+- Adapter classes are `internal sealed`. Other code can reach them only through the ports they implement and a registration extension method.
 - Translate external types and errors into Application/Domain types at the edge ([anti-corruption layer](./architecture-principles.md#boundaries-and-contracts)).
 - All retry, timeout, and reconnection logic lives here.
 
@@ -127,7 +127,7 @@ tests/
 | Host | Application, Infrastructure |
 | Tests | The project under test, plus test utilities |
 
-For an **SDK/library** product, the "Host" is the consumer's application. Ship the public API from the Application layer (or a thin facade over it), and ship adapters as Infrastructure packages that the consumer registers with `AddXyz()`.
+For an **SDK/library** product, the "Host" is the consumer's application. Ship the public API from the Application layer (or a thin facade over it). Ship adapters as Infrastructure packages, which the consumer registers with `AddXyz()`.
 
 ---
 
@@ -158,7 +158,7 @@ internal sealed class SerialDeviceClient(
 }
 ```
 
-The port is owned by Application, and the adapter lives in Infrastructure. Swapping hardware, transport, or vendor means writing a new adapter. **No use case changes.**
+Application owns the port, and Infrastructure contains the adapter. To change hardware, transport, or vendor, write a new adapter. **No use case changes.**
 
 ---
 
@@ -188,7 +188,7 @@ public sealed class CalibrateHandler(IDeviceClient device, ICalibrationStore sto
 
 **Guidelines**
 - Handlers orchestrate. Domain types decide.
-- Return `Result`/`Result<T>` for expected failures, and let unexpected exceptions bubble to the host's global handler.
+- Return `Result`/`Result<T>` for expected failures. Let unexpected exceptions go to the global handler of the host.
 - Accept and pass `CancellationToken` everywhere.
 - A mediator library is **optional**. A simple `ICommandHandler<TCommand, TResult>` interface registered in DI is often enough.
 
@@ -253,7 +253,7 @@ builder.Services.AddHostedService<StatusPoller>();
 await builder.Build().RunAsync();
 ```
 
-Lifetimes and container rules are covered in [.NET › Dependency injection](./dotnet-best-practices.md#dependency-injection).
+[.NET › Dependency injection](./dotnet-best-practices.md#dependency-injection) covers lifetimes and container rules.
 
 ---
 
@@ -280,21 +280,21 @@ public void Application_depends_only_on_domain()
 }
 ```
 
-**Tip:** write one **contract test suite** per port and run it against both the fake and the real adapter. This proves the fake behaves like reality ([LSP](./solid-principles.md#liskov-substitution-principle-lsp)).
+**Tip:** write one **contract test suite** for each port. Run it against both the fake and the real adapter. This proves that the fake behaves like the real adapter ([LSP](./solid-principles.md#liskov-substitution-principle-lsp)).
 
 ---
 
 ## Pragmatism: avoiding ceremony
 
-Clean Architecture pays off when there are real business rules and several external integrations. It **does not** require:
+Clean Architecture is useful when there are real business rules and several external integrations. It **does not** require:
 
 - **An interface for every class.** Abstract only ports (I/O, hardware, time, external systems). Domain types and handlers can be concrete.
-- **Pass-through layers.** If a handler just forwards a call, question whether the use case exists, or call the domain directly from the host for trivial queries.
+- **Pass-through layers.** If a handler only forwards a call, ask whether the use case is necessary. For very simple queries, call the domain directly from the host.
 - **Separate DTOs for identical shapes** inside the same layer.
-- **Four projects for a tiny tool.** A small component can use **folders** (`Domain/`, `Application/`, `Infrastructure/`) in one project, with architecture tests enforcing the rules. Split into projects when the component grows or when reuse demands it.
+- **Four projects for a tiny tool.** A small component can use **folders** (`Domain/`, `Application/`, `Infrastructure/`) in one project, and architecture tests can enforce the rules. Split it into projects when the component grows or when reuse makes this necessary.
 - **A generic repository** over an ORM that already provides one.
 
-When in doubt, apply [KISS and YAGNI](./solid-principles.md#related-principles). The dependency rule is the non-negotiable part; everything else is scaffolding.
+If you are not sure, apply [KISS and YAGNI](./solid-principles.md#related-principles). You must always obey the dependency rule. All other parts are optional support.
 
 ---
 
@@ -304,7 +304,7 @@ When in doubt, apply [KISS and YAGNI](./solid-principles.md#related-principles).
 - [ ] Application defines the ports it needs in domain language and references no Infrastructure types.
 - [ ] Adapters are `internal sealed`, translate external types and errors, and own resilience logic.
 - [ ] The host is thin: composition, configuration, and mapping only.
-- [ ] Use cases are organised by feature, take a `CancellationToken`, and return results for expected failures.
+- [ ] Each use case has its place by feature, takes a `CancellationToken`, and returns a result for expected failures.
 - [ ] Cross-cutting concerns use decorators or pipeline behaviours, not copy-paste.
 - [ ] Each layer has the right kind of tests, and the architecture tests pass.
-- [ ] No unnecessary ceremony: no interface without a reason, and no pass-through layers.
+- [ ] No unnecessary structure: no interface without a reason, and no pass-through layers.

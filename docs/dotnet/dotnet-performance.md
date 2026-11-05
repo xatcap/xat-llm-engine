@@ -1,6 +1,6 @@
 # .NET Performance
 
-Platform-level performance guidance for .NET 10: how to measure, and how the garbage collector, the JIT compiler, threading, I/O, serialization, caching, and deployment choices affect speed and memory. Language-level techniques are in [C# Performance](./csharp-performance.md). Database access is in [EF Core Performance](./efcore-performance.md).
+This page gives platform-level performance guidance for .NET 10. It shows how to measure. It also shows how the garbage collector, the JIT compiler, threading, I/O, serialization, caching, and deployment choices affect speed and memory. Language-level techniques are in [C# Performance](./csharp-performance.md). Database access is in [EF Core Performance](./efcore-performance.md).
 
 ---
 
@@ -18,7 +18,7 @@ Platform-level performance guidance for .NET 10: how to measure, and how the gar
   | Why did it hang or crash? | **`dotnet-dump`** |
 
 - Install the diagnostic tools as .NET tools (`dotnet tool install -g dotnet-counters`) and use them against a Release build.
-- Start with `dotnet-counters`. It shows at a glance whether the problem is CPU, GC, lock contention, or a starved thread pool.
+- Start with `dotnet-counters`. It quickly shows if the problem is CPU, GC, lock contention, or a thread pool without free threads.
 
 ```bash
 dotnet-counters monitor --process-id <pid> --counters System.Runtime
@@ -28,7 +28,7 @@ dotnet-trace collect --process-id <pid> --profile cpu-sampling
 - Add **performance regression tests** for critical paths: run benchmarks in CI and compare against a stored baseline.
 - Publish your own metrics with `System.Diagnostics.Metrics` (a `Meter` with counters and histograms) for things like *lines parsed per second*. See [.NET › Observability](./dotnet-best-practices.md#observability).
 
-**Don't**
+**Do not**
 - Measure Debug builds, builds with a debugger attached, or the first few seconds after startup. The JIT is still optimising code during that time (see below).
 - Compare numbers taken on different machines, or on a laptop running on battery.
 
@@ -36,15 +36,15 @@ dotnet-trace collect --process-id <pid> --profile cpu-sampling
 
 ## The garbage collector
 
-The garbage collector (GC) frees memory that is no longer used. Knowing roughly how it works explains most memory advice.
+The garbage collector (GC) frees memory that is no longer in use. Basic knowledge of how it works explains most memory advice.
 
-- **Generations.** New objects start in *generation 0*. Most objects die young, and gen 0 collections are cheap. Objects that survive move to gen 1 and then gen 2. Gen 2 collections are expensive.
-- **Large Object Heap (LOH).** Objects of 85,000 bytes or more (for example, a large array or string) go straight to the LOH. It is collected only with gen 2, so frequent large allocations are costly.
+- **Generations.** New objects start in *generation 0*. Most objects have a short life, and gen 0 collections are cheap. Objects that survive move to gen 1 and then gen 2. Gen 2 collections are expensive.
+- **Large Object Heap (LOH).** Objects of 85,000 bytes or more (for example, a large array or string) go directly to the LOH. The GC collects it only with gen 2, so frequent large allocations are costly.
 - **Workstation vs Server GC.** Workstation GC uses one heap and suits desktop and small console apps. Server GC uses one heap per CPU core and suits busy services. ASP.NET Core apps use Server GC by default.
 - **DATAS** (Dynamic Adaptation To Application Sizes) is on by default with Server GC. It grows and shrinks the number of heaps to match the load, so a quiet service uses less memory.
 
 **Do**
-- Keep objects short-lived, or keep them alive for the whole process. The costly case is "medium-lived" objects that survive into gen 2 and then die.
+- Keep objects short-lived, or keep them alive for the whole process. The costly case is "medium-lived" objects, which survive into gen 2 and then become unused.
 - Pool or reuse large buffers instead of allocating them repeatedly ([C# › Span, Memory, and pooled buffers](./csharp-performance.md#spant-memoryt-and-pooled-buffers)).
 - Choose the GC mode in the project file, and record why:
 
@@ -57,9 +57,9 @@ The garbage collector (GC) frees memory that is no longer used. Knowing roughly 
 </PropertyGroup>
 ```
 
-- Use `GCSettings.LatencyMode = GCLatencyMode.SustainedLowLatency` only around short sections where pauses must be avoided, and restore the previous mode afterwards. It only has an effect when concurrent GC is on (the default). For a short section that must have no GC at all, use `GC.TryStartNoGCRegion`.
+- Use `GCSettings.LatencyMode = GCLatencyMode.SustainedLowLatency` only around short sections that must not pause. Then restore the previous mode. It only has an effect when concurrent GC is on (the default). For a short section that must have no GC at all, use `GC.TryStartNoGCRegion`.
 
-**Don't**
+**Do not**
 - Call `GC.Collect()` in production code.
 - Add finalizers. Objects with a finalizer survive at least one extra collection. Use `SafeHandle` instead ([.NET › Native interop](./dotnet-best-practices.md#native-interop)).
 - Tune GC settings without a before/after measurement.
@@ -68,18 +68,18 @@ The garbage collector (GC) frees memory that is no longer used. Knowing roughly 
 
 ## The JIT compiler, tiering, and PGO
 
-.NET code is compiled to machine code **at run time** by the JIT (just-in-time) compiler.
+The JIT (just-in-time) compiler compiles .NET code to machine code **at run time**.
 
-- **Tiered compilation.** A method is first compiled quickly with few optimisations, so the app starts fast. If the method is called often, it is compiled again with full optimisations.
-- **Dynamic PGO** (profile-guided optimisation). While running the first version, the runtime records how the method is actually used, for example which concrete type sits behind an interface. The optimised version is then built for that real usage.
-- **Escape analysis.** The .NET 10 JIT can place some small objects that never leave a method on the stack instead of the heap. This is a bonus, not something to design around.
+- **Tiered compilation.** The JIT first compiles a method quickly with few optimisations, so the app starts fast. If the app calls the method often, the JIT compiles it again with full optimisations.
+- **Dynamic PGO** (profile-guided optimisation). While the first version runs, the runtime records how the app uses the method, for example which concrete type is behind an interface. The JIT then builds the optimised version for that real use.
+- **Escape analysis.** The .NET 10 JIT can place some small objects that never leave a method on the stack instead of the heap. This is an extra benefit. Do not make your design depend on it.
 
 **Do**
 - Leave tiered compilation and dynamic PGO **on** (the defaults). They are a large part of why modern .NET is fast.
-- Expect the first calls to be slower. Warm up before measuring.
-- Use **ReadyToRun** (`<PublishReadyToRun>true</PublishReadyToRun>`) when startup time matters. The code is precompiled at publish time, and the JIT still re-optimises hot methods later.
+- Expect the first calls to be slower. Warm up the code before you measure.
+- Use **ReadyToRun** (`<PublishReadyToRun>true</PublishReadyToRun>`) when startup time matters. The publish step precompiles the code, and the JIT still optimises hot methods again later.
 
-**Don't**
+**Do not**
 - Turn off tiered compilation to "make it faster". It usually slows startup and removes PGO.
 - Draw conclusions from a benchmark that runs a method only a few times.
 
@@ -90,32 +90,32 @@ The garbage collector (GC) frees memory that is no longer used. Knowing roughly 
 | Option | What it does | Good for | Trade-off |
 |--------|--------------|----------|-----------|
 | **Framework-dependent** (default) | Uses the .NET runtime installed on the machine | Most apps | Requires the runtime on the target |
-| **Self-contained** | Ships the runtime with the app | Machines you don't control | Larger download |
+| **Self-contained** | Ships the runtime with the app | Machines you do not control | Larger download |
 | **ReadyToRun** | Precompiles code at publish time | Faster startup, still fully dynamic | Larger files |
-| **Native AOT** | Compiles the whole app to a native executable; no JIT at run time | CLI tools, small services, fastest startup and lowest memory | No runtime code generation; reflection-heavy libraries may not work; every dependency must be trim- and AOT-safe |
-| **Trimming** | Removes unused code from the published output | Smaller self-contained and AOT apps | Code reached only by reflection can be removed by mistake |
+| **Native AOT** | Compiles the whole app to a native executable; no JIT at run time | CLI tools, small services, fastest startup and lowest memory | No runtime code generation. Libraries that use much reflection can fail. Every dependency must be trim-safe and AOT-safe. |
+| **Trimming** | Removes unused code from the published output | Smaller self-contained and AOT apps | Trimming can remove code that only reflection reaches |
 
 **Do**
-- Treat trim and AOT warnings as errors in projects that publish with trimming or AOT. A warning means something may break at run time.
-- Use source generators (JSON, logging, regex, configuration binding) instead of reflection. They work with trimming and AOT, and they are faster anyway.
-- Set `<InvariantGlobalization>true</InvariantGlobalization>` for tools that don't need culture-specific behaviour. It removes the ICU dependency and speeds up startup. Be aware that it also changes culture-aware comparison, upper/lower-casing, and sorting of non-ASCII text, so test with real input first.
+- Treat trim and AOT warnings as errors in projects that publish with trimming or AOT. A warning means that something can fail at run time.
+- Use source generators (JSON, logging, regex, configuration binding) instead of reflection. They work with trimming and AOT, and they are also faster.
+- Set `<InvariantGlobalization>true</InvariantGlobalization>` for tools that do not need culture-specific behaviour. It removes the ICU dependency and speeds up startup. It also changes culture-aware comparison, upper/lower-casing, and the sort order of non-ASCII text. Thus, test with real input first.
 
-**Don't**
-- Enable Native AOT in a library project. AOT is a property of the final app. Libraries should only declare `<IsAotCompatible>true</IsAotCompatible>` and fix the warnings it reports.
+**Do not**
+- Turn on Native AOT in a library project. AOT is a property of the final app. Libraries must only declare `<IsAotCompatible>true</IsAotCompatible>` and fix the warnings it reports.
 
 ---
 
 ## Threading and the thread pool
 
-.NET runs most background work and `async` continuations on a shared **thread pool**. If its threads are blocked, all work in the process slows down.
+.NET runs most background work and `async` continuations on a shared **thread pool**. If its threads cannot continue, all work in the process becomes slower.
 
 **Do**
-- Keep I/O asynchronous all the way down in services, where blocked threads starve the pool ([C# › Async/await](./csharp-best-practices.md#asyncawait)). A CPU-bound batch tool that reads one file at a time can use sync reads, which are as fast or faster ([File I/O › Sync or async](./file-io-performance.md#sync-or-async)).
+- Keep I/O asynchronous at all levels in services, because blocked threads use all the threads in the pool ([C# › Async/await](./csharp-best-practices.md#asyncawait)). A CPU-bound batch tool that reads one file at a time can use sync reads. They have the same speed or are faster ([File I/O › Sync or async](./file-io-performance.md#sync-or-async)).
 - Use `Parallel.ForEachAsync` with a `MaxDegreeOfParallelism` to process many independent items, such as many files.
 - Use `Parallel.For` / `Parallel.ForEach` for CPU-heavy work on in-memory data.
-- Use `Channel<T>` to connect a producer (for example, a file reader) with one or more consumers (for example, parsers). Use a **bounded** channel so a fast producer can't fill all memory.
+- Use `Channel<T>` to connect a producer (for example, a file reader) with one or more consumers (for example, parsers). Use a **bounded** channel, so that a fast producer cannot fill all memory.
 - Use the `System.Threading.Lock` type for `lock` statements. It is faster than locking on a plain `object`.
-- Keep locked sections tiny. Never `await`, do I/O, or call unknown code while holding a lock.
+- Keep locked sections very small. While you hold a lock, do not `await`, do I/O, or call unknown code.
 - Use `Interlocked` for simple shared counters.
 
 ```csharp
@@ -126,12 +126,12 @@ var channel = Channel.CreateBounded<string>(new BoundedChannelOptions(10_000)
 });
 ```
 
-**Don't**
-- Block on async code with `.Result` or `.Wait()`. It ties up a pool thread and can starve the pool.
+**Do not**
+- Block on async code with `.Result` or `.Wait()`. It holds a pool thread, and the pool can have no free threads as a result.
 - Start more parallel work than there are cores for CPU-bound work. Extra threads only add switching overhead.
 - Share mutable state between parallel workers without synchronisation. Give each worker its own state and merge the results at the end.
 
-**Why:** Thread pool starvation looks like "everything is slow but the CPU is idle". `dotnet-counters` shows it as a growing *ThreadPool Queue Length*.
+**Why:** When the thread pool has no free threads, everything is slow but the CPU is idle. `dotnet-counters` shows it as a growing *ThreadPool Queue Length*.
 
 ---
 
@@ -140,12 +140,12 @@ var channel = Channel.CreateBounded<string>(new BoundedChannelOptions(10_000)
 These are the basics. Measured comparisons, parallel reads, memory-mapped files, and durable writes are in [File I/O Performance](./file-io-performance.md).
 
 **Do**
-- Read large files **as a stream**, line by line or block by block. Don't load the whole file into memory with `File.ReadAllText` or `File.ReadAllLines`.
+- Read large files **as a stream**, line by line or block by block. Do not load the whole file into memory with `File.ReadAllText` or `File.ReadAllLines`.
 - Pass `FileOptions.SequentialScan` when you read a file from start to end. It tells the operating system to read ahead.
-- Read in large pieces (64 KB or more). The default 4 KB buffer causes many small system calls. When you read into your own large buffer, or through a `StreamReader` with its own large buffer, set the `FileStream`'s `BufferSize = 0` so the data is not copied twice.
-- Use `System.IO.Pipelines` for byte streams that arrive in pieces you don't control, such as network or decompression streams. For a synchronous file parser, a plain read loop is as fast and simpler ([File I/O › Pipelines](./file-io-performance.md#systemiopipelines)).
+- Read in large pieces (64 KB or more). The default 4 KB buffer causes many small system calls. When you read into your own large buffer, or through a `StreamReader` with its own large buffer, set `BufferSize = 0` on the `FileStream`. This prevents a second copy of the data.
+- Use `System.IO.Pipelines` for byte streams that arrive in pieces you do not control, such as network or decompression streams. For a synchronous file parser, a plain read loop has the same speed and is simpler ([File I/O › Pipelines](./file-io-performance.md#systemiopipelines)).
 - Use `RandomAccess` for reads at known positions without a shared file position.
-- Choose `CompressionLevel.Fastest` when writing compressed output that is read soon after. Choose `Optimal` or `SmallestSize` only when file size matters more than time.
+- Choose `CompressionLevel.Fastest` for compressed output that a program reads soon after. Choose `Optimal` or `SmallestSize` only when file size matters more than time.
 
 ```csharp
 await using var stream = new FileStream(path, new FileStreamOptions
@@ -165,7 +165,7 @@ while (await reader.ReadLineAsync(cancellationToken) is { } line)
 
 This is the simple option: one `string` per line. It is about 3× slower than working on bytes. For hot paths, see [File I/O › Work on bytes, not strings](./file-io-performance.md#work-on-bytes-not-strings).
 
-**Don't**
+**Do not**
 - Open and close the same file repeatedly in a loop.
 - Use `MemoryStream` as a growing buffer for large data. It reallocates and copies as it grows. Use pooled buffers or `RecyclableMemoryStream` (from the `Microsoft.IO.RecyclableMemoryStream` NuGet package) instead.
 
@@ -175,8 +175,8 @@ This is the simple option: one `string` per line. It is about 3× slower than wo
 
 **Do**
 - Use `System.Text.Json` with **source generation** (`JsonSerializerContext`). It avoids reflection at run time and works with trimming and AOT.
-- Create `JsonSerializerOptions` **once** and reuse it. Building a new instance for each call throws away its internal caches.
-- Serialize straight to the output stream (`JsonSerializer.SerializeAsync(stream, ...)`) instead of building a string first.
+- Create `JsonSerializerOptions` **once** and reuse it. A new instance for each call removes its internal caches.
+- Serialize directly to the output stream (`JsonSerializer.SerializeAsync(stream, ...)`). Do not build a string first.
 - Use `JsonSerializer.DeserializeAsyncEnumerable` to stream large JSON arrays one item at a time.
 - Use `Utf8JsonWriter` / `Utf8JsonReader` directly for the hottest paths, such as writing millions of records.
 
@@ -188,7 +188,7 @@ internal sealed partial class LogJsonContext : JsonSerializerContext;
 await JsonSerializer.SerializeAsync(output, entry, LogJsonContext.Default.LogEntry, cancellationToken);
 ```
 
-**Don't**
+**Do not**
 - Use `Newtonsoft.Json` in new code. `System.Text.Json` is faster and allocates less.
 - Serialize to a `string` and then encode it to bytes. Write UTF-8 directly.
 
@@ -197,13 +197,13 @@ await JsonSerializer.SerializeAsync(output, entry, LogJsonContext.Default.LogEnt
 ## HTTP
 
 **Do**
-- Use `IHttpClientFactory` or one long-lived `HttpClient` ([.NET › Hosted services, time, and HTTP](./dotnet-best-practices.md#hosted-services-time-and-http)). Connections are then reused.
+- Use `IHttpClientFactory` or one long-lived `HttpClient` ([.NET › Hosted services, time, and HTTP](./dotnet-best-practices.md#hosted-services-time-and-http)). The client then reuses connections.
 - Use `HttpCompletionOption.ResponseHeadersRead` for large responses, and read the body as a stream.
-- Set `PooledConnectionLifetime` on long-lived handlers so DNS changes are picked up.
-- Enable response compression for large text payloads.
+- Set `PooledConnectionLifetime` on long-lived handlers, so that they see DNS changes.
+- Turn on response compression for large text payloads.
 
-**Don't**
-- Create a new `HttpClient` per request. It wastes connections and can exhaust sockets.
+**Do not**
+- Create a new `HttpClient` per request. It wastes connections and can use all available sockets.
 - Read a large response with `ReadAsStringAsync` when you only need to parse it once.
 
 ---
@@ -211,24 +211,24 @@ await JsonSerializer.SerializeAsync(output, entry, LogJsonContext.Default.LogEnt
 ## Caching and pooling
 
 **Do**
-- Cache results that are expensive to compute and read often. Give every cache a **size limit** and an **expiry**, otherwise it is a memory leak.
+- Cache results that are expensive to compute and read often. Give every cache a **size limit** and an **expiry**. Without them, the cache is a memory leak.
 - Use `HybridCache` when you need both an in-memory and a distributed cache. It also prevents many callers from computing the same missing value at the same time.
 - Use `ObjectPool<T>` (from `Microsoft.Extensions.ObjectPool`) for objects that are expensive to create and safe to reset, such as large `StringBuilder` instances.
 
-**Don't**
+**Do not**
 - Pool cheap objects. Pooling has its own cost, and the GC handles small short-lived objects very well.
-- Cache data without deciding how it becomes stale.
+- Cache data without a decision about when it becomes old.
 
 ---
 
 ## Logging cost
 
 **Do**
-- Use source-generated logging (`[LoggerMessage]`) ([.NET › Logging](./dotnet-best-practices.md#logging)). It does no work when the log level is disabled.
+- Use source-generated logging (`[LoggerMessage]`) ([.NET › Logging](./dotnet-best-practices.md#logging)). It does no work when the log level is off.
 - Guard expensive log arguments with `logger.IsEnabled(level)`.
 - Log per batch or per file in hot loops, not per item.
 
-**Don't**
+**Do not**
 - Log at `Information` or above inside a loop that runs per record.
 
 ---
@@ -240,8 +240,8 @@ Set these in the app's project file. Change them only with a measurement that sh
 | Setting | Default | When to change |
 |---------|---------|----------------|
 | `ServerGarbageCollection` | `false` (`true` for ASP.NET Core) | Turn on for throughput-heavy batch tools and services on multi-core machines. |
-| `GarbageCollectionAdaptationMode` | not set (DATAS is on when Server GC is on) | Set to `0` for batch jobs that should use all cores from the start, rather than keep memory low. |
-| `ConcurrentGarbageCollection` | `true` | Turn off only for pure batch jobs where pause times don't matter. |
+| `GarbageCollectionAdaptationMode` | not set (DATAS is on when Server GC is on) | Set to `0` for batch jobs where use of all cores from the start is more important than low memory use. |
+| `ConcurrentGarbageCollection` | `true` | Turn off only for pure batch jobs where pause times do not matter. |
 | `TieredCompilation` | `true` | Leave on. |
 | `TieredPGO` | `true` | Leave on. |
 | `PublishReadyToRun` | `false` | Turn on when startup time matters. |
@@ -252,12 +252,12 @@ Set these in the app's project file. Change them only with a measurement that sh
 
 ## Review checklist
 
-- [ ] The claim "this is faster" is backed by BenchmarkDotNet results or a trace from a Release build.
-- [ ] Large files are streamed, not loaded whole, and large buffers are pooled.
-- [ ] No `GC.Collect()`, no finalizers, and GC settings changes are measured and explained.
-- [ ] Tiered compilation and PGO are left on; trim/AOT warnings are treated as errors where trimming or AOT is used.
-- [ ] No blocking on async code; parallel work has a bounded degree of parallelism; channels are bounded.
+- [ ] BenchmarkDotNet results or a trace from a Release build support the claim "this is faster".
+- [ ] Code streams large files and does not load them whole. Code pools large buffers.
+- [ ] No `GC.Collect()`, no finalizers. A measurement and an explanation support all changes to GC settings.
+- [ ] Tiered compilation and PGO stay on. Trim/AOT warnings are errors where the project uses trimming or AOT.
+- [ ] No blocking on async code. Parallel work has a bounded degree of parallelism. Channels are bounded.
 - [ ] JSON uses source-generated `System.Text.Json` with reused options.
-- [ ] `HttpClient` is reused through the factory.
+- [ ] The code reuses `HttpClient` through the factory.
 - [ ] Every cache has a size limit and an expiry.
-- [ ] Hot loops don't log per item.
+- [ ] Hot loops do not log per item.

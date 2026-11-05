@@ -12,7 +12,7 @@ internal static class HttpFailure
 
     /// <summary>Builds the error for a failed response.</summary>
     /// <remarks>
-    /// The provider's own message is passed on only for problems the caller can fix. Other messages stay hidden,
+    /// The engine forwards the provider's own message only for problems that the caller can correct. Other messages stay hidden,
     /// because an authentication error from a provider can echo part of the engine's secret key.
     /// </remarks>
     /// <param name="providerName">The provider's name, for the message.</param>
@@ -32,7 +32,7 @@ internal static class HttpFailure
             HttpStatusCode.NotFound =>
                 new EngineError(ErrorKind.NotFound, await ReadMessageAsync(response, $"The provider '{providerName}' does not have this model.", cancellationToken).ConfigureAwait(false)),
             HttpStatusCode.TooManyRequests =>
-                new EngineError(ErrorKind.RateLimited, $"The provider '{providerName}' is rate limiting requests."),
+                new EngineError(ErrorKind.RateLimited, $"The provider '{providerName}' applies a rate limit to requests."),
             HttpStatusCode.ServiceUnavailable or (HttpStatusCode)Overloaded =>
                 new EngineError(ErrorKind.Unavailable, $"The provider '{providerName}' is temporarily unavailable."),
             HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden =>
@@ -41,17 +41,17 @@ internal static class HttpFailure
         };
     }
 
-    /// <summary>Builds the error for a provider that could not be reached or took too long.</summary>
+    /// <summary>Builds the error for a provider that the engine could not reach, or that took too long.</summary>
     /// <param name="providerName">The provider's name, for the message.</param>
     /// <returns>An error that is safe to show to the caller.</returns>
     public static EngineError Unreachable(string providerName) =>
-        new(ErrorKind.Unavailable, $"The provider '{providerName}' could not be reached in time.");
+        new(ErrorKind.Unavailable, $"The engine could not reach the provider '{providerName}' in time.");
 
     /// <summary>Builds the error for a response the engine could not understand.</summary>
     /// <param name="providerName">The provider's name, for the message.</param>
     /// <returns>An error that is safe to show to the caller.</returns>
     public static EngineError Malformed(string providerName) =>
-        new(ErrorKind.Upstream, $"The provider '{providerName}' returned a response the engine could not read.");
+        new(ErrorKind.Upstream, $"The provider '{providerName}' returned a response that the engine could not read.");
 
     /// <summary>Reads the provider's error message, which any of the supported protocols may send.</summary>
     /// <param name="response">The failed response.</param>

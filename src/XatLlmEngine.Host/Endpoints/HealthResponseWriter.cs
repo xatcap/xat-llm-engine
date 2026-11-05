@@ -7,10 +7,10 @@ namespace XatLlmEngine.Host.Endpoints;
 /// <summary>Writes the body of <c>GET /health</c>.</summary>
 internal static class HealthResponseWriter
 {
-    /// <summary>Writes the overall status, the local model's stage, and what that stage means. It reveals no addresses, keys, paths or provider names, because this route needs no key.</summary>
+    /// <summary>Writes the overall status, the local model's stage, and what that stage means. This route needs no key, so it shows no addresses, keys, paths or provider names.</summary>
     /// <param name="context">The current request.</param>
     /// <param name="report">The health report.</param>
-    /// <returns>A task that completes when the body has been written.</returns>
+    /// <returns>A task that completes after the engine writes the body.</returns>
     public static Task WriteAsync(HttpContext context, HealthReport report)
     {
         var local = report.Entries.TryGetValue("local", out var entry) ? entry.Description ?? "unknown" : "disabled";
@@ -26,10 +26,10 @@ internal static class HealthResponseWriter
     {
         "ready" => "The local model is ready.",
         "disabled" => "The local model is turned off in settings.",
-        "starting" => "The local model is loading. Local requests return 503 until it is ready. Cloud providers are not affected.",
-        "restarting" => "llama-server stopped or failed to load, and the engine is restarting it. Local requests return 503 until then. Cloud providers are not affected.",
-        "missing" => "The model or server file is missing. Local requests return 503 until it is installed and the engine restarts. Cloud providers are not affected.",
-        "stopped" => "The engine is shutting down.",
+        "starting" => "The local model is loading. Local requests return 503 until it is ready. Cloud providers continue to work.",
+        "restarting" => "llama-server stopped or failed to load, and the engine is restarting it. Local requests return 503 until then. Cloud providers continue to work.",
+        "missing" => "The model or server file is missing. Local requests return 503 until you install the file and restart the engine. Cloud providers continue to work.",
+        "stopped" => "The engine is stopping.",
         _ => "The local model's stage is unknown.",
     };
 }

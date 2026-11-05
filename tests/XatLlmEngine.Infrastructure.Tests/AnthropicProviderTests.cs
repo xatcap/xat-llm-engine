@@ -80,7 +80,7 @@ public class AnthropicProviderTests
         Assert.False(body.RootElement.TryGetProperty("system", out _));
     }
 
-    /// <summary>Text blocks are joined, and the stop reason and token counts are converted.</summary>
+    /// <summary>The provider joins text blocks, and converts the stop reason and token counts.</summary>
     /// <returns>A task for the test.</returns>
     [Fact]
     public async Task Complete_ValidResponse_ReturnsAnswer()
@@ -102,7 +102,7 @@ public class AnthropicProviderTests
         Assert.Equal(ErrorKind.Unavailable, result.Error!.Kind);
     }
 
-    /// <summary>A refusal is reported as a content filter stop.</summary>
+    /// <summary>The provider reports a refusal as a content filter stop.</summary>
     /// <returns>A task for the test.</returns>
     [Fact]
     public async Task Complete_Refusal_ReportsContentFilter()
@@ -131,7 +131,7 @@ public class AnthropicProviderTests
             chunks);
     }
 
-    /// <summary>An error event after the stream starts is thrown.</summary>
+    /// <summary>The provider throws an error event that comes after the stream starts.</summary>
     /// <returns>A task for the test.</returns>
     [Fact]
     public async Task Stream_ErrorEvent_Throws()

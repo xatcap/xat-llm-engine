@@ -119,7 +119,7 @@ public class ApiTests
         Assert.Equal(HttpStatusCode.BadRequest, fake.StatusCode);
     }
 
-    /// <summary>Other content types are refused, because that blocks cross-site requests from browsers.</summary>
+    /// <summary>The API refuses other content types, because that blocks cross-site requests from browsers.</summary>
     /// <returns>A task for the test.</returns>
     [Fact]
     public async Task Chat_NotJsonContentType_Returns415()
@@ -149,7 +149,7 @@ public class ApiTests
     /// <summary>Provider failures map to HTTP statuses, and temporary ones tell callers when to retry.</summary>
     /// <param name="kind">The failure category.</param>
     /// <param name="status">The expected status.</param>
-    /// <param name="retryAfter">Whether a Retry-After header is expected.</param>
+    /// <param name="retryAfter">Whether the test expects a Retry-After header.</param>
     /// <returns>A task for the test.</returns>
     [Theory]
     [InlineData(ErrorKind.RateLimited, HttpStatusCode.TooManyRequests, true)]
@@ -259,7 +259,7 @@ public class ApiTests
         Assert.Equal(HttpStatusCode.TooManyRequests, response.StatusCode);
     }
 
-    /// <summary>A failure in the very first event is still a normal HTTP error, because nothing has been written yet.</summary>
+    /// <summary>A failure in the first event is still a normal HTTP error, because the engine has not written any data.</summary>
     /// <returns>A task for the test.</returns>
     [Fact]
     public async Task Stream_FailsOnFirstEvent_ReturnsHttpError()
@@ -333,7 +333,7 @@ public class ApiTests
         Assert.Contains("fake/model-a", ids);
     }
 
-    /// <summary>When keys are configured, requests without a correct key are refused on every API route.</summary>
+    /// <summary>When the configuration has keys, every API route refuses requests without a correct key.</summary>
     /// <param name="header">The Authorization header to send, if any.</param>
     /// <returns>A task for the test.</returns>
     [Theory]
@@ -362,7 +362,7 @@ public class ApiTests
         Assert.Null(engine.Provider.LastRequest);
     }
 
-    /// <summary>The correct key is accepted, and any of several keys works.</summary>
+    /// <summary>The API accepts the correct key, and any one of several keys works.</summary>
     /// <param name="key">The key to send.</param>
     /// <returns>A task for the test.</returns>
     [Theory]
@@ -469,7 +469,7 @@ public class ApiTests
         Assert.Contains("missing", message, StringComparison.Ordinal);
     }
 
-    /// <summary>A request with a host name from outside the machine is refused, which blocks DNS rebinding attacks from web pages.</summary>
+    /// <summary>The engine refuses a request with a host name from outside the machine. This blocks DNS rebinding attacks from web pages.</summary>
     /// <returns>A task for the test.</returns>
     [Fact]
     public async Task Hosts_NonLocalHostName_IsRefused()

@@ -119,7 +119,7 @@ jobs:
             label="dryrun-${VERSION}-${GITHUB_RUN_ID}"
             flags+=(--target "$GITHUB_SHA" --title "Dry run ${VERSION}")
           fi
-          # The release stays a draft until every file has been uploaded, so nobody can download a partial release.
+          # The release stays a draft until the upload of every file is complete, so nobody can download a partial release.
           gh release create "$label" --draft --generate-notes "${flags[@]}"
           gh release upload "$label" release/*
           if [ "$IS_TAG" = "true" ]; then

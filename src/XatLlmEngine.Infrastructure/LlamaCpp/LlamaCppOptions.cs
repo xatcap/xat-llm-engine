@@ -8,7 +8,7 @@ public sealed class LlamaCppOptions
     /// <summary>The configuration section that holds these settings.</summary>
     public const string SectionName = "LocalModel";
 
-    /// <summary>Gets a value indicating whether the <c>local</c> provider is enabled.</summary>
+    /// <summary>Gets a value that tells whether the <c>local</c> provider is on.</summary>
     public bool Enabled { get; init; } = true;
 
     /// <summary>Gets the name callers use after the <c>local/</c> prefix.</summary>
@@ -19,7 +19,7 @@ public sealed class LlamaCppOptions
     [Required(AllowEmptyStrings = false)]
     public string ModelPath { get; init; } = "models/Ministral-3-3B-Instruct-2512-Q4_K_M.gguf";
 
-    /// <summary>Gets the llama-server path without any <c>.exe</c> suffix, which is added on Windows. A relative path starts at the engine's folder.</summary>
+    /// <summary>Gets the llama-server path without a <c>.exe</c> suffix. The engine adds this suffix on Windows. A relative path starts at the engine's folder.</summary>
     [Required(AllowEmptyStrings = false)]
     public string ServerPath { get; init; } = "llama/llama-server";
 
@@ -42,11 +42,11 @@ public sealed class LlamaCppOptions
     [Range(0.0, 2.0)]
     public double DefaultTemperature { get; init; } = 0.07;
 
-    /// <summary>Gets how long a model may take to load, in seconds, before the server is restarted.</summary>
+    /// <summary>Gets how long a model can take to load, in seconds, before the engine restarts the server.</summary>
     [Range(1, 86_400)]
     public int StartupTimeoutSeconds { get; init; } = 600;
 
-    /// <summary>Gets the seconds between health checks of a running server. Three failures in a row cause a restart, because a hung process never exits by itself.</summary>
+    /// <summary>Gets the seconds between health checks of a running server. Three failures in a row cause a restart, because a process that stops responding never exits by itself.</summary>
     [Range(1, 3_600)]
     public int HealthCheckIntervalSeconds { get; init; } = 10;
 

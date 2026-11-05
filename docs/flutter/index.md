@@ -1,6 +1,6 @@
 # Flutter Engineering Guidelines
 
-These pages describe how we write, structure, and review Dart and Flutter code in this repository. They are a **shared baseline**, not a rulebook to be applied blindly: when a rule doesn't fit, deviate deliberately and write down why (in the PR, or in an [ADR](../adr) for significant decisions).
+These pages describe how to write, structure, and review Dart and Flutter code. They are a **shared baseline**, not a set of fixed laws. If a rule does not fit, you can use a different solution. Write the reason in the PR, or in an [ADR](../adr) for significant decisions. All text follows the [writing style](../writing-style.md).
 
 **Baseline:** Flutter 3.44 (stable) · Dart 3.12 · sound null safety · Material 3 · `flutter_bloc` for state management.
 
@@ -21,34 +21,38 @@ These pages describe how we write, structure, and review Dart and Flutter code i
 2. **Starting a new feature or app:** Architecture → BLoC → UI/UX.
 3. **Working on jank, slow startup, or a large app binary:** Performance.
 4. **Building a screen:** UI/UX → Flutter → Performance.
-5. **Reviewing a PR:** jump straight to the *Review checklist* at the end of each page.
+5. **Reviewing a PR:** go to the *Review checklist* at the end of each page.
 
 ## How the pages are organised
 
 Every page follows the same shape as the [.NET guidelines](../dotnet/index.md):
 
-- **Do / Don't** bullets: the rule in one line.
+- **Do / Do not** bullets: the rule in one line.
 - **Examples**: `❌` marks code to avoid, `✅` marks the preferred alternative.
-- **Why** (where the reasoning isn't obvious from the rule): so you can judge edge cases yourself.
+- **Why** (where the rule does not make the reason clear): the reason for the rule, so that you can decide about edge cases.
 - **Review checklist**: a short list to use during code review.
 
-The code samples leave out doc comments so they stay short. Real code must document every public class and member with `///` comments, as described in [Dart › Documentation comments](./dart-best-practices.md#documentation-comments).
+The code samples do not include doc comments, because this keeps them short. Real code must document every public class and member with `///` comments, as [Dart › Documentation comments](./dart-best-practices.md#documentation-comments) describes.
 
-General principles that are not specific to Flutter (SOLID, coupling and cohesion, ADRs) live in the .NET pages and are linked rather than repeated. For example, the *principle* of dependency inversion lives in [SOLID](../dotnet/solid-principles.md#dependency-inversion-principle-dip), the *Flutter mechanics* of injecting repositories live in [BLoC › Dependency injection](./bloc-best-practices.md#dependency-injection), and *how packages are wired* lives in [Architecture › Composition root](./flutter-architecture.md#composition-root).
+General principles that are not specific to Flutter (SOLID, coupling and cohesion, ADRs) are in the .NET pages. These pages link to them and do not repeat them. For example:
+
+- The *principle* of dependency inversion is in [SOLID](../dotnet/solid-principles.md#dependency-inversion-principle-dip).
+- The *Flutter mechanics* of repository injection are in [BLoC › Dependency injection](./bloc-best-practices.md#dependency-injection).
+- *How packages connect* is in [Architecture › Composition root](./flutter-architecture.md#composition-root).
 
 ## Citing a rule in a review
 
-Headings are stable, so link to them directly:
+Headings do not change, so link to them directly:
 
 > See [Flutter › BuildContext](./flutter-best-practices.md#buildcontext): this uses `context` after an `await` without checking `context.mounted`.
 
-If a guideline is outdated or wrong, change it in a PR like any other code. Guidelines that nobody follows should be fixed or removed, not ignored.
+If a guideline is old or wrong, change it in a PR, as you do for code. If nobody follows a guideline, correct it or remove it. Do not ignore it.
 
 ## Precedence
 
 When sources disagree, follow this order:
 
-1. Analyzer diagnostics and lints enforced by the build (`analysis_options.yaml`).
+1. Analyzer diagnostics and lints that the build enforces (`analysis_options.yaml`).
 2. Accepted ADRs.
 3. These guidelines.
 4. Personal preference.

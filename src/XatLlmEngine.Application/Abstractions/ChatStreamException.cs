@@ -2,7 +2,7 @@ using XatLlmEngine.Domain;
 
 namespace XatLlmEngine.Application.Abstractions;
 
-/// <summary>Reports that a stream failed after it started, when a <see cref="Result{T}"/> can no longer be returned.</summary>
+/// <summary>Reports that a stream failed after it started, when the code can no longer return a <see cref="Result{T}"/>.</summary>
 public sealed class ChatStreamException : Exception
 {
     /// <summary>Initializes a new instance of the <see cref="ChatStreamException"/> class.</summary>
