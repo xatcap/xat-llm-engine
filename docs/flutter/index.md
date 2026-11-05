@@ -50,13 +50,6 @@ Headings do not change, so link to them directly:
 
 > See [Flutter › BuildContext](./flutter-best-practices.md#buildcontext): this uses `context` after an `await` without checking `context.mounted`.
 
-If a guideline is old or wrong, change it in a PR, as you do for code. If nobody follows a guideline, correct it or remove it. Do not ignore it.
-
-## Precedence
-
-When sources disagree, follow this order:
-
-1. Analyzer diagnostics and lints that the build enforces (`analysis_options.yaml`).
-2. Accepted ADRs.
-3. These guidelines.
-4. Personal preference.
+- If a guideline is old or wrong, change it in a PR, as you do for code.
+- If nobody follows a guideline, correct it or remove it.
+- Do not ignore it. Always ask for permission for removing or adding a guideline.

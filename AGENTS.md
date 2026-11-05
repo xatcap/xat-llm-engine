@@ -7,8 +7,8 @@
 
 This file is an index to the documentation in this repository.
 
-- Route your task to the relevant documentation.
-- Read the pages that apply to your task before you change code or text.
+- Route the given task to the relevant documentation.
+- Read the pages that apply to the given task before you change code or text.
 
 ## Start here
 

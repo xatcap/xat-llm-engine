@@ -53,12 +53,3 @@ Headings do not change, so link to them directly:
 > See [C# › Async/await](./csharp-best-practices.md#asyncawait): this blocks on `.Result`.
 
 If a guideline is old or wrong, change it in a PR, as you do for code. If nobody follows a guideline, correct it or remove it. Do not ignore it.
-
-## Precedence
-
-When sources disagree, follow this order:
-
-1. Analyzer and compiler diagnostics that the build enforces (`.editorconfig`, `Directory.Build.props`).
-2. Accepted ADRs.
-3. These guidelines.
-4. Personal preference.
