@@ -1,9 +1,10 @@
 using System.ComponentModel.DataAnnotations;
+using XatLlmEngine.Infrastructure.Providers;
 
 namespace XatLlmEngine.Infrastructure.LlamaCpp;
 
 /// <summary>Settings for the local model and the llama-server program that runs it.</summary>
-public sealed class LlamaCppOptions
+public sealed class LlamaCppOptions : IValidatableObject
 {
     /// <summary>The configuration section that holds these settings.</summary>
     public const string SectionName = "LocalModel";
@@ -59,4 +60,12 @@ public sealed class LlamaCppOptions
 
     /// <summary>Gets the system prompt to use from the start of the engine. Callers can change it through the API until the next restart. Blank means no prompt, so the default in the model's chat template applies.</summary>
     public string? SystemPrompt { get; init; }
+
+    /// <summary>Gets the longest system prompt to accept, in characters. The limit applies to the API routes and to <see cref="SystemPrompt"/>.</summary>
+    [Range(1, SystemPromptRules.LengthCeiling)]
+    public int MaxSystemPromptLength { get; init; } = SystemPromptRules.DefaultLength;
+
+    /// <inheritdoc/>
+    public IEnumerable<ValidationResult> Validate(ValidationContext validationContext) =>
+        SystemPromptRules.ValidateSettings(SystemPrompt, MaxSystemPromptLength);
 }

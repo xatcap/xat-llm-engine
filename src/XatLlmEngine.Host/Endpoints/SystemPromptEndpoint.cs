@@ -11,25 +11,25 @@ internal static class SystemPromptEndpoint
     /// <summary>Replaces a provider's prompt.</summary>
     /// <param name="provider">The provider's name.</param>
     /// <param name="context">The current request.</param>
-    /// <param name="store">The stored prompts.</param>
+    /// <param name="handler">The use case.</param>
     /// <returns>The HTTP result.</returns>
-    public static Task<IResult> ReplaceAsync(string provider, HttpContext context, SystemPromptStore store) =>
-        ChangeAsync(provider, context, store.Replace);
+    public static Task<IResult> ReplaceAsync(string provider, HttpContext context, ReplaceSystemPromptHandler handler) =>
+        ChangeAsync(provider, context, handler.Handle);
 
     /// <summary>Adds text to the end of a provider's prompt.</summary>
     /// <param name="provider">The provider's name.</param>
     /// <param name="context">The current request.</param>
-    /// <param name="store">The stored prompts.</param>
+    /// <param name="handler">The use case.</param>
     /// <returns>The HTTP result.</returns>
-    public static Task<IResult> AppendAsync(string provider, HttpContext context, SystemPromptStore store) =>
-        ChangeAsync(provider, context, store.Append);
+    public static Task<IResult> AppendAsync(string provider, HttpContext context, AppendSystemPromptHandler handler) =>
+        ChangeAsync(provider, context, handler.Handle);
 
     /// <summary>Reads the request and applies one change.</summary>
     /// <param name="provider">The provider's name.</param>
     /// <param name="context">The current request.</param>
-    /// <param name="change">The change to apply.</param>
+    /// <param name="handle">The use case to run.</param>
     /// <returns>The HTTP result.</returns>
-    private static async Task<IResult> ChangeAsync(string provider, HttpContext context, Func<string, string, Result<string>> change)
+    private static async Task<IResult> ChangeAsync(string provider, HttpContext context, Func<SystemPromptCommand, Result<string>> handle)
     {
         // The engine requires JSON content because browsers cannot send it across sites without a CORS approval, which the engine never gives.
         if (!context.Request.HasJsonContentType())
@@ -57,7 +57,7 @@ internal static class SystemPromptEndpoint
             return ErrorMapping.ToResult(context, new EngineError(ErrorKind.InvalidRequest, "The request body must be a JSON object with a text 'prompt' field."));
         }
 
-        var result = change(provider, prompt);
+        var result = handle(new SystemPromptCommand(provider, prompt));
         return result.IsSuccess
             ? Results.Json(new SystemPromptResponse(provider, result.Value!), HostJson.Default.SystemPromptResponse)
             : ErrorMapping.ToResult(context, result.Error);

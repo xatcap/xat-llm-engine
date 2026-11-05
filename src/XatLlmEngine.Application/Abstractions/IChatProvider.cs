@@ -1,3 +1,4 @@
+using System.Text.Json.Nodes;
 using XatLlmEngine.Domain;
 
 namespace XatLlmEngine.Application.Abstractions;
@@ -7,19 +8,19 @@ namespace XatLlmEngine.Application.Abstractions;
 /// This is a port (Dependency Inversion Principle): use cases depend on it, and Infrastructure implements it.
 /// A new provider therefore needs no change to any use case. Implementations must be thread-safe.
 /// </remarks>
-public interface IChatProvider
+public interface IChatProvider : ISystemPromptSettings
 {
-    /// <summary>Gets the name callers use as the prefix of a model, for example <c>anthropic</c>.</summary>
-    string Name { get; }
-
     /// <summary>Gets the model names to advertise. A provider may also accept names not in this list.</summary>
     IReadOnlyList<string> Models { get; }
 
     /// <summary>Gets the request fields this provider accepts, besides <c>model</c> and <c>stream</c>. This list is the provider's request template.</summary>
     IReadOnlyList<string> RequestFields { get; }
 
-    /// <summary>Gets the system prompt from the configuration, which applies from the start of the engine until a caller changes it.</summary>
-    string? SystemPrompt { get; }
+    /// <summary>Checks that a request does not set its own system prompt, and adds the stored prompt. Only the provider knows its format, so every provider must implement this.</summary>
+    /// <param name="body">The caller's JSON. This method does not change it.</param>
+    /// <param name="prompt">The stored prompt, or <see langword="null"/> when the provider has none.</param>
+    /// <returns>The body to send, or an invalid-request failure.</returns>
+    Result<JsonObject> ApplySystemPrompt(JsonObject body, string? prompt);
 
     /// <summary>Generates a complete answer.</summary>
     /// <param name="request">The validated request.</param>

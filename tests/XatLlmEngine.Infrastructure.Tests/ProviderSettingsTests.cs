@@ -7,6 +7,31 @@ namespace XatLlmEngine.Infrastructure.Tests;
 /// <summary>Tests the rules for cloud provider settings and retries.</summary>
 public class ProviderSettingsTests
 {
+    /// <summary>The configuration cannot set a limit above the ceiling, and cannot set a limit of zero.</summary>
+    /// <param name="limit">The configured limit.</param>
+    [Theory]
+    [InlineData(SystemPromptRules.LengthCeiling + 1)]
+    [InlineData(0)]
+    public void Validate_SystemPromptLimitOutOfRange_Throws(int limit)
+    {
+        var options = new ProviderOptions { BaseUrl = new Uri("https://api.example.com"), RequestFields = ["messages"], MaxSystemPromptLength = limit };
+
+        var failure = Assert.Throws<InvalidOperationException>(() => DependencyInjection.Validate("cloud", options));
+
+        Assert.Contains("MaxSystemPromptLength", failure.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>A configured prompt over the limit stops the engine at startup.</summary>
+    [Fact]
+    public void Validate_ConfiguredPromptOverLimit_Throws()
+    {
+        var options = new ProviderOptions { BaseUrl = new Uri("https://api.example.com"), RequestFields = ["messages"], MaxSystemPromptLength = 3, SystemPrompt = "1234" };
+
+        var failure = Assert.Throws<InvalidOperationException>(() => DependencyInjection.Validate("cloud", options));
+
+        Assert.Contains("SystemPrompt", failure.Message, StringComparison.Ordinal);
+    }
+
     /// <summary>The settings accept secure addresses, and plain addresses on this machine.</summary>
     /// <param name="address">The base address.</param>
     [Theory]

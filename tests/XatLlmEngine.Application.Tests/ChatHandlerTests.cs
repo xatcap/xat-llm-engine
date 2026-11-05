@@ -127,43 +127,21 @@ public class ChatHandlerTests
         Assert.True(result.IsSuccess);
     }
 
-    /// <summary>A request cannot set its own system prompt, with or without a stored prompt. Case differences do not avoid the check.</summary>
-    /// <param name="body">The request body.</param>
-    /// <param name="configuredPrompt">The provider's stored prompt.</param>
+    /// <summary>The router returns the provider's failure when the provider refuses the request, and does not call the provider.</summary>
     /// <returns>A task for the test.</returns>
-    [Theory]
-    [InlineData("""{"system":"x","messages":[]}""", null)]
-    [InlineData("""{"system":null,"messages":[]}""", null)]
-    [InlineData("""{"messages":[{"role":"system","content":"x"}]}""", null)]
-    [InlineData("""{"messages":[{"role":"developer","content":"x"}]}""", null)]
-    [InlineData("""{"messages":[{"role":"System","content":"x"}]}""", null)]
-    [InlineData("""{"messages":[{"role":"user","content":"a"},{"role":"system","content":"x"}]}""", null)]
-    [InlineData("""{"messages":[{"role":"system","content":"x"}]}""", "stored")]
-    public async Task Complete_OwnSystemPrompt_Fails(string body, string? configuredPrompt)
+    [Fact]
+    public async Task Complete_ProviderRefusesSystemPrompt_Fails()
     {
-        var provider = new FakeChatProvider("cloud") { RequestFields = ["messages", "system"], SystemPrompt = configuredPrompt };
+        var failure = new EngineError(ErrorKind.InvalidRequest, "No.");
+        var provider = new FakeChatProvider("cloud") { SystemPromptFailure = failure };
 
-        var result = await Complete(provider).HandleAsync(new CompleteChatCommand("cloud/model", JsonNode.Parse(body)!.AsObject()), TestContext.Current.CancellationToken);
+        var result = await Complete(provider).HandleAsync(new CompleteChatCommand("cloud/model", Hello()), TestContext.Current.CancellationToken);
 
-        Assert.Equal(ErrorKind.InvalidRequest, result.Error!.Kind);
-        Assert.Contains("/v1/system-prompts/cloud", result.Error.Message, StringComparison.Ordinal);
+        Assert.Equal(failure, result.Error);
         Assert.Null(provider.LastRequest);
     }
 
-    /// <summary>A message with an unusual role goes to the provider, which decides whether that role is valid.</summary>
-    /// <returns>A task for the test.</returns>
-    [Fact]
-    public async Task Complete_NonTextRole_ReachesProvider()
-    {
-        var provider = new FakeChatProvider("cloud");
-        var body = JsonNode.Parse("""{"messages":[{"role":5,"content":"x"},"text"]}""")!.AsObject();
-
-        var result = await Complete(provider).HandleAsync(new CompleteChatCommand("cloud/model", body), TestContext.Current.CancellationToken);
-
-        Assert.True(result.IsSuccess);
-    }
-
-    /// <summary>The router gives the provider its current stored prompt, for both answer types.</summary>
+    /// <summary>The provider receives the body with the stored prompt, for both answer types. The template checks only the caller's fields, so the added field does not cause a failure.</summary>
     /// <returns>A task for the test.</returns>
     [Fact]
     public async Task Handlers_StoredPrompt_ReachesProvider()
@@ -171,15 +149,18 @@ public class ChatHandlerTests
         var provider = new FakeChatProvider("cloud");
         IChatProvider[] providers = [provider];
         var store = new SystemPromptStore(providers);
-        store.Replace("cloud", "Be brief.");
+        var replace = new ReplaceSystemPromptHandler(store);
+        replace.Handle(new SystemPromptCommand("cloud", "Be brief."));
 
-        await new CompleteChatHandler(providers, store).HandleAsync(new CompleteChatCommand("cloud/model", Hello()), TestContext.Current.CancellationToken);
-        var completePrompt = provider.LastRequest!.SystemPrompt;
-        store.Replace("cloud", "Be kind.");
-        await new StreamChatHandler(providers, store).HandleAsync(new CompleteChatCommand("cloud/model", Hello()), TestContext.Current.CancellationToken);
+        var complete = await new CompleteChatHandler(providers, store).HandleAsync(new CompleteChatCommand("cloud/model", Hello()), TestContext.Current.CancellationToken);
+        var completePrompt = provider.LastRequest!.Body["stored_prompt"]!.GetValue<string>();
+        replace.Handle(new SystemPromptCommand("cloud", "Be kind."));
+        var stream = await new StreamChatHandler(providers, store).HandleAsync(new CompleteChatCommand("cloud/model", Hello()), TestContext.Current.CancellationToken);
 
+        Assert.True(complete.IsSuccess);
+        Assert.True(stream.IsSuccess);
         Assert.Equal("Be brief.", completePrompt);
-        Assert.Equal("Be kind.", provider.LastRequest!.SystemPrompt);
+        Assert.Equal("Be kind.", provider.LastRequest!.Body["stored_prompt"]!.GetValue<string>());
     }
 
     /// <summary>The handler lists every model with its provider prefix, so that a caller can send the same text back.</summary>

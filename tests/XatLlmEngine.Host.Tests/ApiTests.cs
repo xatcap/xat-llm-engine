@@ -452,17 +452,17 @@ public class ApiTests
 
         using var complete = await PostAsync(engine, ValidBody);
         Assert.Equal(HttpStatusCode.OK, complete.StatusCode);
-        Assert.Equal("Be brief.", engine.Provider.LastRequest!.SystemPrompt);
+        Assert.Equal("Be brief.", engine.Provider.LastSystemPrompt);
 
         using var cleared = await SendPromptAsync(engine, HttpMethod.Put, "/v1/system-prompts/fake", """{"prompt":""}""");
         Assert.Equal(HttpStatusCode.OK, cleared.StatusCode);
         using var noPrompt = await PostAsync(engine, ValidBody);
-        Assert.Null(engine.Provider.LastRequest!.SystemPrompt);
+        Assert.Null(engine.Provider.LastSystemPrompt);
 
         using var again = await SendPromptAsync(engine, HttpMethod.Put, "/v1/system-prompts/fake", """{"prompt":"Be kind."}""");
         using var stream = await PostAsync(engine, """{"model":"fake/model-a","stream":true,"messages":[{"role":"user","content":"Hi"}]}""");
         Assert.Equal(HttpStatusCode.OK, stream.StatusCode);
-        Assert.Equal("Be kind.", engine.Provider.LastRequest!.SystemPrompt);
+        Assert.Equal("Be kind.", engine.Provider.LastSystemPrompt);
     }
 
     /// <summary>Append adds to the stored prompt, and a newline separates the parts.</summary>
@@ -536,7 +536,56 @@ public class ApiTests
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         await AssertErrorFormatAsync(response, "invalid_request_error");
         using var chat = await PostAsync(engine, ValidBody);
-        Assert.Null(engine.Provider.LastRequest!.SystemPrompt);
+        Assert.Null(engine.Provider.LastSystemPrompt);
+    }
+
+    /// <summary>A prompt over the provider's limit returns 400 from both routes, and the prompt stays unchanged.</summary>
+    /// <returns>A task for the test.</returns>
+    [Fact]
+    public async Task SystemPrompt_OverLimit_Returns400()
+    {
+        await using var engine = new EngineFactory();
+        var tooLong = new string('x', 41);
+
+        using var ok = await SendPromptAsync(engine, HttpMethod.Put, "/v1/system-prompts/fake", """{"prompt":"Be brief."}""");
+        using var replaced = await SendPromptAsync(engine, HttpMethod.Put, "/v1/system-prompts/fake", $$"""{"prompt":"{{tooLong}}"}""");
+        using var appended = await SendPromptAsync(engine, HttpMethod.Post, "/v1/system-prompts/fake/append", $$"""{"prompt":"{{tooLong}}"}""");
+
+        Assert.Equal(HttpStatusCode.BadRequest, replaced.StatusCode);
+        await AssertErrorFormatAsync(replaced, "invalid_request_error");
+        Assert.Equal(HttpStatusCode.BadRequest, appended.StatusCode);
+        using var chat = await PostAsync(engine, ValidBody);
+        Assert.Equal("Be brief.", engine.Provider.LastSystemPrompt);
+    }
+
+    /// <summary>The shipped configuration gives the local model a limit of 8000 characters.</summary>
+    /// <returns>A task for the test.</returns>
+    [Fact]
+    public async Task SystemPrompt_ShippedLocalLimit_Is8000()
+    {
+        await using var engine = new EngineFactory();
+
+        using var atLimit = await SendPromptAsync(engine, HttpMethod.Put, "/v1/system-prompts/local", $$"""{"prompt":"{{new string('x', 8000)}}"}""");
+        using var overLimit = await SendPromptAsync(engine, HttpMethod.Put, "/v1/system-prompts/local", $$"""{"prompt":"{{new string('x', 8001)}}"}""");
+
+        Assert.Equal(HttpStatusCode.OK, atLimit.StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, overLimit.StatusCode);
+    }
+
+    /// <summary>The configured limit of the local model reaches the API routes.</summary>
+    /// <returns>A task for the test.</returns>
+    [Fact]
+    public async Task SystemPrompt_ConfiguredLocalLimit_Applies()
+    {
+        await using var engine = new EngineFactory();
+        await using var configured = engine.WithWebHostBuilder(builder => builder.ConfigureAppConfiguration((_, configuration) =>
+            configuration.AddInMemoryCollection(new Dictionary<string, string?> { ["LocalModel:MaxSystemPromptLength"] = "5" })));
+        using var client = configured.CreateClient();
+        using var content = new StringContent("""{"prompt":"123456"}""", Encoding.UTF8, "application/json");
+
+        using var response = await client.PutAsync(new Uri("/v1/system-prompts/local", UriKind.Relative), content, TestContext.Current.CancellationToken);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
     }
 
     /// <summary>A body that is not JSON returns 415, because browsers can send such a body from any site.</summary>
@@ -556,18 +605,21 @@ public class ApiTests
         Assert.Equal(HttpStatusCode.UnsupportedMediaType, response.StatusCode);
     }
 
-    /// <summary>A chat request with its own system prompt returns 400 and does not reach the provider.</summary>
+    /// <summary>The local model's adapter refuses a request that sets its own prompt or has no message list, before it checks that the model is ready.</summary>
+    /// <param name="body">The request body.</param>
     /// <returns>A task for the test.</returns>
-    [Fact]
-    public async Task Chat_OwnSystemPrompt_Returns400()
+    [Theory]
+    [InlineData("""{"model":"local/ministral-3-3b","messages":[{"role":"system","content":"x"},{"role":"user","content":"Hi"}]}""")]
+    [InlineData("""{"model":"local/ministral-3-3b","messages":"Hi"}""")]
+    [InlineData("""{"model":"local/ministral-3-3b"}""")]
+    public async Task Chat_BadSystemPromptShape_Returns400(string body)
     {
         await using var engine = new EngineFactory();
 
-        using var response = await PostAsync(engine, """{"model":"fake/model-a","messages":[{"role":"system","content":"x"},{"role":"user","content":"Hi"}]}""");
+        using var response = await PostAsync(engine, body);
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         await AssertErrorFormatAsync(response, "invalid_request_error");
-        Assert.Null(engine.Provider.LastRequest);
     }
 
     /// <summary>Sends a JSON body to a system prompt route.</summary>

@@ -1,4 +1,3 @@
-using System.Text.Json.Nodes;
 using XatLlmEngine.Application.Abstractions;
 using XatLlmEngine.Application.Features.SystemPrompts;
 using XatLlmEngine.Domain;
@@ -32,11 +31,10 @@ internal sealed class ChatRouter(IEnumerable<IChatProvider> providers, SystemPro
                 $"The provider '{model.Value.Provider}' is not available. Check its name, and check that the configuration has its API key."));
         }
 
-        if (HasOwnSystemPrompt(command.Body))
+        var body = provider.ApplySystemPrompt(command.Body, systemPrompts.Get(provider.Name));
+        if (!body.IsSuccess)
         {
-            return Result<RoutedChat>.Fail(new EngineError(
-                ErrorKind.InvalidRequest,
-                $"A chat request cannot set a system prompt. Use PUT /v1/system-prompts/{provider.Name} instead."));
+            return Result<RoutedChat>.Fail(body.Error);
         }
 
         var unsupported = command.Body.Select(field => field.Key).FirstOrDefault(name => !IsAccepted(provider, name));
@@ -47,19 +45,8 @@ internal sealed class ChatRouter(IEnumerable<IChatProvider> providers, SystemPro
                 $"The provider '{provider.Name}' does not support the field '{unsupported}'. Supported fields: model, stream, {string.Join(", ", provider.RequestFields)}."));
         }
 
-        return Result<RoutedChat>.Ok(new RoutedChat(provider, new ChatRequest(model.Value.Model, command.Body, systemPrompts.Get(provider.Name)), model.Value));
+        return Result<RoutedChat>.Ok(new RoutedChat(provider, new ChatRequest(model.Value.Model, body.Value!), model.Value));
     }
-
-    /// <summary>Tells whether a request sets its own system prompt, in either the Anthropic format or the OpenAI format.</summary>
-    /// <param name="body">The caller's JSON.</param>
-    /// <returns><see langword="true"/> when the request has a system prompt.</returns>
-    private static bool HasOwnSystemPrompt(JsonObject body) =>
-        body.ContainsKey("system")
-        || (body["messages"] is JsonArray messages && messages.Any(message =>
-            message is JsonObject fields
-            && fields["role"] is JsonValue role
-            && role.TryGetValue<string>(out var name)
-            && (name.Equals("system", StringComparison.OrdinalIgnoreCase) || name.Equals("developer", StringComparison.OrdinalIgnoreCase))));
 
     /// <summary>Tells whether a provider accepts a field. Every provider accepts <c>model</c> and <c>stream</c>, because the engine needs them to route the request.</summary>
     /// <param name="provider">The selected provider.</param>

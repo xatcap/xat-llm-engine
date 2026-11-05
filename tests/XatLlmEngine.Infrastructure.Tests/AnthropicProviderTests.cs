@@ -44,13 +44,13 @@ public class AnthropicProviderTests
 
         """;
 
-    /// <summary>The request has Anthropic's headers, and the caller's fields arrive unchanged in Anthropic's own format, with the stored system prompt.</summary>
+    /// <summary>The request has Anthropic's headers, and the caller's fields arrive unchanged in Anthropic's own format.</summary>
     /// <returns>A task for the test.</returns>
     [Fact]
     public async Task Complete_SendsExpectedRequest()
     {
         var http = new StubHttpHandler(HttpStatusCode.OK, CompletionBody);
-        var request = TestRequests.Parse("""{"model":"anthropic/model-x","max_tokens":100,"stop_sequences":["END"],"top_k":5,"messages":[{"role":"user","content":[{"type":"text","text":"Hello"}]}]}""") with { SystemPrompt = "Be brief." };
+        var request = TestRequests.Parse("""{"model":"anthropic/model-x","system":"Be brief.","max_tokens":100,"stop_sequences":["END"],"top_k":5,"messages":[{"role":"user","content":[{"type":"text","text":"Hello"}]}]}""");
 
         await Provider(http).CompleteAsync(request, TestContext.Current.CancellationToken);
 
@@ -64,23 +64,6 @@ public class AnthropicProviderTests
         Assert.Equal("END", body.RootElement.GetProperty("stop_sequences")[0].GetString());
         Assert.Equal(5, body.RootElement.GetProperty("top_k").GetInt32());
         Assert.Equal("Hello", body.RootElement.GetProperty("messages")[0].GetProperty("content")[0].GetProperty("text").GetString());
-    }
-
-    /// <summary>A streamed request also carries the stored prompt.</summary>
-    /// <returns>A task for the test.</returns>
-    [Fact]
-    public async Task Stream_StoredPrompt_IsSent()
-    {
-        var http = new StubHttpHandler(HttpStatusCode.OK, StreamBody);
-
-        var result = await Provider(http).StreamAsync(TestRequests.Minimal with { SystemPrompt = "Be brief." }, TestContext.Current.CancellationToken);
-        await foreach (var chunk in result.Value!.WithCancellation(TestContext.Current.CancellationToken))
-        {
-            Assert.NotNull(chunk);
-        }
-
-        using var body = JsonDocument.Parse(http.LastBody!);
-        Assert.Equal("Be brief.", body.RootElement.GetProperty("system").GetString());
     }
 
     /// <summary>Anthropic requires a token limit, so the configured default fills it in.</summary>

@@ -3,7 +3,7 @@ using System.ComponentModel.DataAnnotations;
 namespace XatLlmEngine.Infrastructure.Providers;
 
 /// <summary>Settings for one cloud provider. The configuration key under <c>Providers</c> becomes its name.</summary>
-public sealed class ProviderOptions
+public sealed class ProviderOptions : IValidatableObject
 {
     /// <summary>The configuration section that holds all cloud providers.</summary>
     public const string SectionName = "Providers";
@@ -28,6 +28,10 @@ public sealed class ProviderOptions
     /// <summary>Gets the system prompt to use from the start of the engine. Callers can change it through the API until the next restart. Blank means no prompt.</summary>
     public string? SystemPrompt { get; init; }
 
+    /// <summary>Gets the longest system prompt to accept, in characters. The limit applies to the API routes and to <see cref="SystemPrompt"/>.</summary>
+    [Range(1, SystemPromptRules.LengthCeiling)]
+    public int MaxSystemPromptLength { get; init; } = SystemPromptRules.DefaultLength;
+
     /// <summary>Gets the token limit to use when a caller sends none. Anthropic requires a limit on every request.</summary>
     [Range(1, int.MaxValue)]
     public int DefaultMaxTokens { get; init; } = 4096;
@@ -39,4 +43,8 @@ public sealed class ProviderOptions
     /// <summary>Gets how many retries to do when a provider returns a 429 or 5xx status, or when the engine cannot reach it. Retries occur only before a response starts.</summary>
     [Range(0, 10)]
     public int MaxRetries { get; init; } = 2;
+
+    /// <inheritdoc/>
+    public IEnumerable<ValidationResult> Validate(ValidationContext validationContext) =>
+        SystemPromptRules.ValidateSettings(SystemPrompt, MaxSystemPromptLength);
 }

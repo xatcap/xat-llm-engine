@@ -4,64 +4,61 @@ using XatLlmEngine.Domain;
 
 namespace XatLlmEngine.Application.Features.SystemPrompts;
 
-/// <summary>Holds the current system prompt of each provider. The prompts stay in memory, so a restart returns each provider to its configured prompt.</summary>
+/// <summary>Holds the current system prompt of each provider, and keeps each prompt inside its limit. The prompts stay in memory, so a restart returns each provider to its configured prompt.</summary>
 public sealed class SystemPromptStore
 {
-    /// <summary>The prompts by provider name. A blank prompt means that the engine adds nothing. Names ignore case, because configuration keys do too.</summary>
-    private readonly ConcurrentDictionary<string, string> prompts;
+    /// <summary>The prompt and limit of each provider. Names ignore case, because configuration keys do too.</summary>
+    private readonly ConcurrentDictionary<string, Entry> entries;
 
     /// <summary>Initializes a new instance of the <see cref="SystemPromptStore"/> class.</summary>
-    /// <param name="providers">Every provider enabled in this deployment.</param>
-    public SystemPromptStore(IEnumerable<IChatProvider> providers)
+    /// <param name="providers">The settings of every provider enabled in this deployment.</param>
+    public SystemPromptStore(IEnumerable<ISystemPromptSettings> providers)
     {
-        prompts = new ConcurrentDictionary<string, string>(
-            providers.Select(provider => KeyValuePair.Create(provider.Name, provider.SystemPrompt ?? string.Empty)),
+        entries = new ConcurrentDictionary<string, Entry>(
+            providers.Select(provider => KeyValuePair.Create(provider.Name, new Entry(provider.InitialSystemPrompt ?? string.Empty, provider.MaxSystemPromptLength))),
             StringComparer.OrdinalIgnoreCase);
     }
 
     /// <summary>Gets the prompt to add to a provider's requests.</summary>
     /// <param name="provider">The provider's name.</param>
-    /// <returns>The prompt, or <see langword="null"/> when the provider has none.</returns>
+    /// <returns>The prompt, or <see langword="null"/> when the prompt is blank or the provider is unknown.</returns>
     public string? Get(string provider) =>
-        prompts.TryGetValue(provider, out var prompt) && !string.IsNullOrWhiteSpace(prompt) ? prompt : null;
+        entries.TryGetValue(provider, out var entry) && !string.IsNullOrWhiteSpace(entry.Prompt) ? entry.Prompt : null;
 
-    /// <summary>Replaces a provider's prompt. An empty prompt clears it.</summary>
+    /// <summary>Changes a provider's prompt as one step, so that the limit always holds and no change is lost.</summary>
     /// <param name="provider">The provider's name.</param>
-    /// <param name="prompt">The new prompt.</param>
-    /// <returns>The full prompt, or a not-found failure.</returns>
-    public Result<string> Replace(string provider, string prompt)
+    /// <param name="change">Builds the new prompt from the current prompt. This can run more than once, so it must have no side effects.</param>
+    /// <returns>The full prompt, a not-found failure, or an invalid-request failure when the prompt is too long. A failure leaves the prompt unchanged.</returns>
+    public Result<string> Change(string provider, Func<string, string> change)
     {
-        if (!prompts.ContainsKey(provider))
+        ArgumentNullException.ThrowIfNull(change);
+        while (true)
         {
-            return NotFound(provider);
-        }
+            if (!entries.TryGetValue(provider, out var current))
+            {
+                return Result<string>.Fail(new EngineError(
+                    ErrorKind.NotFound,
+                    $"The provider '{provider}' is not available. Check its name, and check that the configuration has its API key."));
+            }
 
-        prompts[provider] = prompt;
-        return Result<string>.Ok(prompt);
+            var next = change(current.Prompt);
+            if (next.Length > current.Limit)
+            {
+                return Result<string>.Fail(new EngineError(
+                    ErrorKind.InvalidRequest,
+                    $"The system prompt of provider '{provider}' cannot be longer than {current.Limit} characters. The prompt did not change."));
+            }
+
+            // TryUpdate fails when another caller changes the prompt at the same time. The loop then tries again with the new prompt.
+            if (entries.TryUpdate(provider, current with { Prompt = next }, current))
+            {
+                return Result<string>.Ok(next);
+            }
+        }
     }
 
-    /// <summary>Adds text to the end of a provider's prompt. A newline separates the text from any existing prompt.</summary>
-    /// <param name="provider">The provider's name.</param>
-    /// <param name="text">The text to add. Empty text changes nothing.</param>
-    /// <returns>The full prompt, or a not-found failure.</returns>
-    public Result<string> Append(string provider, string text)
-    {
-        if (!prompts.ContainsKey(provider))
-        {
-            return NotFound(provider);
-        }
-
-        // AddOrUpdate retries when another caller changes the prompt at the same time, so that no text is lost.
-        return Result<string>.Ok(prompts.AddOrUpdate(
-            provider,
-            _ => text,
-            (_, current) => current.Length == 0 || text.Length == 0 ? current + text : $"{current}\n{text}"));
-    }
-
-    /// <summary>Builds the failure for an unknown provider.</summary>
-    /// <param name="provider">The provider's name.</param>
-    /// <returns>A not-found failure.</returns>
-    private static Result<string> NotFound(string provider) => Result<string>.Fail(new EngineError(
-        ErrorKind.NotFound,
-        $"The provider '{provider}' is not available. Check its name, and check that the configuration has its API key."));
+    /// <summary>One provider's values.</summary>
+    /// <param name="Prompt">The current prompt. A blank prompt means that the engine adds nothing.</param>
+    /// <param name="Limit">The longest prompt, in characters.</param>
+    private sealed record Entry(string Prompt, int Limit);
 }

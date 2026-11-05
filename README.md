@@ -89,7 +89,7 @@ Answers are text only. `tools` and `n` are not in any template, because the unif
 
 | Status | Meaning |
 |---|---|
-| 400 | The request is invalid. This includes a field the provider does not list, and a chat request that sets a system prompt. The provider can also reject the request. |
+| 400 | The request is invalid. This includes a field the provider does not list, a `messages` field that is missing or is not a list, and a chat request that sets a system prompt. The provider can also reject the request. |
 | 404 | The route, provider or model does not exist. A cloud provider with no API key counts as not existing. |
 | 405 | The route exists, but does not accept this HTTP method. |
 | 415 | The `Content-Type` is not `application/json`. |
@@ -103,7 +103,7 @@ A stream that fails after it has started has already sent status 200. It ends wi
 
 ## Request templates
 
-Each provider accepts only the fields in its template. The engine forwards these fields to the provider unchanged, and it does not check their values. A bad value returns the vendor's own 400 message.
+Each provider accepts only the fields in its template. The engine forwards these fields to the provider unchanged, and it does not check their values. A bad value returns the vendor's own 400 message. The one exception is `messages`, which the engine checks itself. See [System prompts](#system-prompts).
 
 | Provider | Accepted fields |
 |---|---|
@@ -134,14 +134,20 @@ A blank prompt, which is empty or only spaces, means that the engine adds nothin
 
 Chat requests cannot set a system prompt. The engine returns 400 when a request has a top-level `system` field. It also returns 400 when a message has the role `system` or `developer`, in any letter case. This applies to every provider, even when no prompt is stored. This breaks OpenAI client code and frameworks that add a system message. Remove the system message from the request, and use a stored prompt instead.
 
+A chat request must also have a `messages` list. The engine returns 400 when `messages` is missing or is not a list, for every provider. This is an exception to the rule that the engine does not check forwarded fields. Without a list, the engine cannot add the stored prompt.
+
+For a provider added through configuration, do not add its own prompt field to `RequestFields`, because the engine does not detect it.
+
 The bundled local model has a default prompt in its chat template. A stored prompt replaces this default completely. Append adds text only to the stored prompt. With no stored prompt, the appended text becomes the whole prompt, and the default no longer applies. Send `"prompt":""` to clear the prompt. The engine then adds nothing, and the default applies again.
 
 Vendors may add their own instructions to every request. A stored prompt cannot remove the behaviour that a model is trained with. Cloud behaviour has not been tested against live vendor APIs.
 
+Each provider has a limit on its prompt length, in characters. Set the limit with `MaxSystemPromptLength`. The limit applies to the full prompt after an append, including the newline. A limit above 1000000 or below 1 stops the engine at startup. A configured `SystemPrompt` that is longer than the limit also stops the engine at startup.
+
 These errors apply to the system prompt routes:
 
 - 404: the provider is unknown, the local model is disabled, or a cloud provider has no API key.
-- 400: the body is malformed, or `prompt` is missing or is not text.
+- 400: the body is malformed, `prompt` is missing or is not text, or the prompt is too long. After an error, the prompt does not change.
 - 415: the `Content-Type` is not `application/json`.
 
 These routes have no authentication. Any program on this machine can change a provider's prompt. The change affects every caller of that provider until the next restart. The prompt is not a security control. A caller can still add instructions to a `user` message.
@@ -180,6 +186,7 @@ Settings live in `appsettings.json`, next to the program. This file lists every 
 | `Providers__<name>__RequestTimeoutSeconds` | How long to wait for the provider to start its answer, across all retries. The default is 600. |
 | `Providers__<name>__DefaultMaxTokens` | The token limit when a caller sends none. Only Anthropic uses it, because its API requires a limit. The default is 4096. |
 | `Providers__<name>__SystemPrompt` | The system prompt at engine start. Callers can change it until the next restart. Blank by default. |
+| `Providers__<name>__MaxSystemPromptLength` | The longest system prompt of that provider, in characters. The default is 8000. The highest value is 1000000. |
 | `Providers__<name>__RequestFields__0` | Sets the field at index 0 of a provider's request template. Add more with `__1`, `__2` and so on. Overrides replace entries by index, and they cannot shorten the list. To remove a field, edit `appsettings.json`. |
 | `Urls` | The listening address. It must be a loopback address. The default is `http://127.0.0.1:8420`. |
 | `AllowedHosts` | The host names callers may use. The default allows only loopback names. |
@@ -188,6 +195,7 @@ Settings live in `appsettings.json`, next to the program. This file lists every 
 | `LocalModel__Parallel` | How many requests generate at once. These requests share the context size. The default is 1. |
 | `LocalModel__DefaultTemperature` | The temperature when a caller sends none. The default is 0.07, as Mistral recommends values below 0.1. |
 | `LocalModel__SystemPrompt` | The system prompt at engine start. Callers can change it until the next restart. Blank by default. |
+| `LocalModel__MaxSystemPromptLength` | The longest system prompt of the local model, in characters. The default is 8000. The highest value is 1000000. |
 | `LocalModel__StartupTimeoutSeconds` | How long the model may take to load. The default is 600. |
 | `LocalModel__HealthCheckIntervalSeconds` | Seconds between health checks of a running llama-server. Three failed checks in a row make the engine replace it, because a hung server never exits by itself. The default is 10. |
 | `LocalModel__ExtraArguments__0` | An extra `llama-server` argument. Add more with `__1`, `__2` and so on. |
