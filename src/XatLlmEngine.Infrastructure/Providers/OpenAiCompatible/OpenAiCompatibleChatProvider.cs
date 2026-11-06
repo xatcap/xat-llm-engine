@@ -19,6 +19,9 @@ internal sealed class OpenAiCompatibleChatProvider(string name, ProviderOptions 
     public IReadOnlyList<string> RequestFields => options.RequestFields;
 
     /// <inheritdoc/>
+    public bool AcceptsPortableFields => true;
+
+    /// <inheritdoc/>
     public int MaxTokensLimit => options.MaxTokensLimit;
 
     /// <inheritdoc/>

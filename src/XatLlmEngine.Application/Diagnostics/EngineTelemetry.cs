@@ -54,14 +54,19 @@ public sealed class EngineTelemetry : IDisposable
     /// <param name="provider">The selected provider.</param>
     /// <param name="model">The model name inside the provider.</param>
     /// <param name="stream">Whether the request asks for a stream.</param>
+    /// <param name="renamedFields">The renamed portable fields, with names only, or <see langword="null"/> when nothing changed.</param>
     /// <returns>The measurement. Record its end once.</returns>
-    internal ChatMeasurement Start(IChatProvider provider, string model, bool stream)
+    internal ChatMeasurement Start(IChatProvider provider, string model, bool stream, string? renamedFields = null)
     {
         var modelTag = provider.Models.Contains(model, StringComparer.Ordinal) ? model : OtherModel;
         var activity = Source.StartActivity("chat", ActivityKind.Internal);
         activity?.SetTag("xat_engine.provider", provider.Name);
         activity?.SetTag("xat_engine.model", modelTag);
         activity?.SetTag("xat_engine.stream", stream);
+        if (renamedFields is not null)
+        {
+            activity?.SetTag("xat_engine.renamed_fields", renamedFields);
+        }
         return new ChatMeasurement(this, provider.Name, modelTag, stream, activity);
     }
 

@@ -39,7 +39,7 @@ public sealed class CompleteChatHandler(
             chat.Provider,
             chat.Request.Body,
             budget,
-            (telemetry ?? EngineTelemetry.Unregistered).Start(chat.Provider, chat.Request.Model, stream: false));
+            (telemetry ?? EngineTelemetry.Unregistered).Start(chat.Provider, chat.Request.Model, stream: false, chat.Fields.Describe()));
         if (budget.Check(chat.Provider) is { } budgetProblem)
         {
             accounting.FailedBeforeAnswer(budgetProblem.Kind);

@@ -81,6 +81,7 @@ It also lists `Urls` and `AllowedHosts`. ASP.NET has more listening settings, su
 - A provider entry without `RequestFields` stops the engine at startup, even when that provider has no key.
 - A local model without `RequestFields` also stops the engine at startup, even when you disable the local model.
 - Custom entries from version 1.0.0 must add `RequestFields`.
+- The template also decides the renames of the [portable fields](api.md#portable-fields). For example, a provider that lists `random_seed` gets a portable `seed` as `random_seed`. A portable field works for a provider only when the template lists the field or one of its other names. The exception is `stream_options`. An OpenAI-format provider accepts it even when its template has none. The [API reference](api.md#portable-fields) gives the rules.
 
 ## Add another provider
 
@@ -97,7 +98,7 @@ Any service that speaks the OpenAI protocol needs only configuration. For exampl
 }
 ```
 
-Set its key with `Providers__groq__ApiKey`. The `RequestFields` list above is an example. Copy the fields that the vendor really accepts.
+Set its key with `Providers__groq__ApiKey`. The `RequestFields` list above is an example. Copy the fields that the vendor really accepts. A vendor that uses another name for a portable field needs a code change, because the rename table is in the code. See [ADR 0012](adr/0012-portable-fields.md).
 
 [Supported models](api.md#supported-models) tells which vendors work.
 

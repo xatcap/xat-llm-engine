@@ -68,7 +68,7 @@ dotnet-counters monitor --counters XatLlmEngine --name XatLlmEngine.Host
 
 ### Traces
 
-The activity source `XatLlmEngine` gives one `chat` activity for each request. Record it with `dotnet-trace`.
+The activity source `XatLlmEngine` gives one `chat` activity for each request. Record it with `dotnet-trace`. When the engine renames [portable fields](api.md#portable-fields), the tag `xat_engine.renamed_fields` holds their names, for example `seed>random_seed`. A removed `stream_options` shows as `stream_options>(removed)`. The tag never holds values.
 
 ## One engine for each install
 

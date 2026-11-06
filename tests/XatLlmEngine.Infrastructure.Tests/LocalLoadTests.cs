@@ -248,14 +248,20 @@ public class LocalLoadTests
             + "Check LlamaCppOptions.AllowedFlags, LlamaEnvironment.IsLlamaSetting, LlamaServerPaths.ConfigFiles and the /health and /props routes against the new source. Then change LlamaCppCompatibility.VerifiedTag.");
     }
 
-    /// <summary>On Linux, a process name is cut to 15 characters, so a long program name still matches.</summary>
+    /// <summary>
+    /// A long program name matches its full name on every system. On Linux, .NET can also report the name cut to 15
+    /// characters, so that form matches there. No other part of the name, and no other name, matches.
+    /// </summary>
     [Fact]
     public void PidFile_LongProgramName_Matches()
     {
         const string Program = "/opt/engine/llama/llama-server-with-long-name";
-        var reported = OperatingSystem.IsLinux() ? "llama-server-wi" : "llama-server-with-long-name";
 
-        Assert.True(LlamaServerPidFile.HasProgramName(reported, Program));
+        Assert.True(LlamaServerPidFile.HasProgramName("llama-server-with-long-name", Program));
+        Assert.Equal(OperatingSystem.IsLinux(), LlamaServerPidFile.HasProgramName("llama-server-wi", Program));
+        Assert.False(LlamaServerPidFile.HasProgramName("llama-server-wX", Program));
+        Assert.False(LlamaServerPidFile.HasProgramName("llama-server", Program));
+        Assert.False(LlamaServerPidFile.HasProgramName("llama", Program));
         Assert.False(LlamaServerPidFile.HasProgramName("bash", Program));
     }
 

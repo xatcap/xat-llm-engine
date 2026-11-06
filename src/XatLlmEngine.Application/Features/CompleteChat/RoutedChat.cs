@@ -7,4 +7,5 @@ namespace XatLlmEngine.Application.Features.CompleteChat;
 /// <param name="Provider">The selected provider.</param>
 /// <param name="Request">The validated request.</param>
 /// <param name="Model">The full <c>provider/model</c> reference to report back to the caller.</param>
-internal sealed record RoutedChat(IChatProvider Provider, ChatRequest Request, ModelReference Model);
+/// <param name="Fields">The renames of portable fields.</param>
+internal sealed record RoutedChat(IChatProvider Provider, ChatRequest Request, ModelReference Model, FieldMap Fields);

@@ -18,6 +18,12 @@ public interface IChatProvider
     /// <summary>Gets the request fields this provider accepts, besides <c>model</c> and <c>stream</c>. This list is the provider's request template.</summary>
     IReadOnlyList<string> RequestFields { get; }
 
+    /// <summary>
+    /// Gets a value indicating whether the provider uses the OpenAI format, so that it accepts the portable fields. The engine
+    /// renames a portable field to the name in <see cref="RequestFields"/>. See ADR 0012.
+    /// </summary>
+    bool AcceptsPortableFields => false;
+
     /// <summary>Gets the largest number of output tokens that a caller can ask for, or 0 for no limit. With a limit, a request with no token field gets the limit. See ADR 0011.</summary>
     int MaxTokensLimit => 0;
 

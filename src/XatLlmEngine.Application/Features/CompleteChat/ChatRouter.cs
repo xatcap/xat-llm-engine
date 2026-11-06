@@ -4,7 +4,7 @@ using XatLlmEngine.Domain;
 
 namespace XatLlmEngine.Application.Features.CompleteChat;
 
-/// <summary>Selects the provider named by the model prefix, and checks the request against that provider's rules.</summary>
+/// <summary>Selects the provider named by the model prefix, checks the request against that provider's rules, and renames portable fields.</summary>
 internal static class ChatRouter
 {
     /// <summary>Applies the rules for a chat request.</summary>
@@ -26,12 +26,10 @@ internal static class ChatRouter
                 $"The provider '{model.Value.Provider}' is not available. Check its name, and check that the configuration has its API key."));
         }
 
-        var unsupported = command.Body.Select(field => field.Key).FirstOrDefault(name => !IsAccepted(provider, name));
-        if (unsupported is not null)
+        var fields = PortableFields.Resolve(provider, command.Body);
+        if (!fields.IsSuccess)
         {
-            return Result<RoutedChat>.Fail(new EngineError(
-                ErrorKind.InvalidRequest,
-                $"The provider '{provider.Name}' does not support the field '{unsupported}'. Supported fields: model, stream, {string.Join(", ", provider.RequestFields)}."));
+            return Result<RoutedChat>.Fail(fields.Error);
         }
 
         if (MessageRules.FindToolContent(command.Body) is { } toolContent)
@@ -41,18 +39,12 @@ internal static class ChatRouter
 
         // This is the only copy. The provider owns it and can change it, so the caller's body never changes.
         var body = command.Body.DeepClone().AsObject();
-        if (TokenLimitPolicy.Apply(provider, body) is { } limitProblem)
+        fields.Value.ApplyTo(body);
+        if (TokenLimitPolicy.Apply(provider, body, fields.Value.SentName) is { } limitProblem)
         {
             return Result<RoutedChat>.Fail(limitProblem);
         }
 
-        return Result<RoutedChat>.Ok(new RoutedChat(provider, new ChatRequest(model.Value.Model, body), model.Value));
+        return Result<RoutedChat>.Ok(new RoutedChat(provider, new ChatRequest(model.Value.Model, body), model.Value, fields.Value));
     }
-
-    /// <summary>Tells whether a provider accepts a field. Every provider accepts <c>model</c> and <c>stream</c>, because the engine needs them to route the request.</summary>
-    /// <param name="provider">The selected provider.</param>
-    /// <param name="name">The field's name.</param>
-    /// <returns><see langword="true"/> when the engine can forward the field.</returns>
-    private static bool IsAccepted(IChatProvider provider, string name) =>
-        name is "model" or "stream" || provider.RequestFields.Contains(name, StringComparer.Ordinal);
 }

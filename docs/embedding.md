@@ -53,6 +53,16 @@ A later version can add fields to the file. Accept fields that you do not know.
 
 If the first address in `Urls` is a Unix socket, `url` is the socket address, for example `http://unix:/path/to/engine.sock`.
 
+## Switch between local and cloud
+
+Use only the [portable fields](api.md#portable-fields) in your requests. Then the same body works for `local`, `openai` and `mistral`, and your app changes only `model`:
+
+```json
+{"model":"local/ministral-3-3b","messages":[{"role":"user","content":"Hello"}],"max_tokens":256,"seed":1}
+```
+
+To use the cloud, change `model` to, for example, `mistral/mistral-small-latest`. Before the first cloud request, read `GET /health/ready?provider=mistral`. The provider must have an API key.
+
 ## Stop the engine
 
 Close the engine's standard input. The engine then stops `llama-server`, deletes the ready file and exits. Wait for the engine process to exit.

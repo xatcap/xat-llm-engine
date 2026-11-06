@@ -63,7 +63,7 @@ The model takes a little while to load. [Install](docs/operations.md#install) ha
 
 ## Cloud providers
 
-Set the API key of a provider in an environment variable, for example `Providers__anthropic__ApiKey`. Then send requests to a model such as `anthropic/claude-sonnet-5-5`. Each provider uses its own request format, and every provider gives the same response format. See the [API reference](docs/api.md).
+Set the API key of a provider in an environment variable, for example `Providers__openai__ApiKey`. Then send requests to a model such as `openai/<model>`. With the [portable fields](docs/api.md#portable-fields), one request body works for the local model, OpenAI and Mistral, so your app changes only `model`. Anthropic uses its own request format. Every provider gives the same response format.
 
 ## Privacy
 

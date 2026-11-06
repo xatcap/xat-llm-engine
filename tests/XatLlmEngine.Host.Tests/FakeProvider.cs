@@ -14,7 +14,10 @@ internal sealed class FakeProvider : IChatProvider
     public IReadOnlyList<string> Models { get; } = ["model-a"];
 
     /// <inheritdoc/>
-    public IReadOnlyList<string> RequestFields { get; } = ["messages", "temperature", "stream_options"];
+    public IReadOnlyList<string> RequestFields { get; set; } = ["messages", "temperature", "stream_options"];
+
+    /// <inheritdoc/>
+    public bool AcceptsPortableFields { get; set; }
 
     /// <inheritdoc/>
     public TokenBudget? Budget { get; set; }

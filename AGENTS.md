@@ -31,7 +31,7 @@ The ADRs record the significant decisions and their reasons. Read them before yo
 | ADR | Status |
 |-----|--------|
 | [0001. Run llama.cpp as a child process](docs/adr/0001-run-llama-cpp-as-child-process.md) | Accepted |
-| [0002. Expose an OpenAI-compatible API, with plain HTTP adapters](docs/adr/0002-openai-compatible-api-and-http-adapters.md) | Partly replaced by 0004 |
+| [0002. Expose an OpenAI-compatible API, with plain HTTP adapters](docs/adr/0002-openai-compatible-api-and-http-adapters.md) | Partly replaced by 0004, see 0012 |
 | [0003. Attach the model as a separate release file](docs/adr/0003-release-packaging.md) | Accepted |
 | [0004. Give each provider its own request template](docs/adr/0004-one-request-template-per-provider.md) | Accepted, amended |
 | [0005. Use Semantic Versioning, a changelog and locked packages](docs/adr/0005-versioning-policy.md) | Accepted |
@@ -40,7 +40,8 @@ The ADRs record the significant decisions and their reasons. Read them before yo
 | [0008. Read the first piece before the success status](docs/adr/0008-streaming-contract.md) | Accepted |
 | [0009. Queue local requests in the engine, and stop a busy server only when it sends nothing](docs/adr/0009-local-load-and-hang-policy.md) | Accepted |
 | [0010. Report the health of each provider, with stable values](docs/adr/0010-health-contract.md) | Accepted |
-| [0011. Limit the cost of cloud providers with a token limit and a token budget](docs/adr/0011-cost-control.md) | Accepted |
+| [0011. Limit the cost of cloud providers with a token limit and a token budget](docs/adr/0011-cost-control.md) | Accepted, amended |
+| [0012. Accept portable field names for providers that use the OpenAI format](docs/adr/0012-portable-fields.md) | Accepted |
 
 ## Engineering guidelines
 

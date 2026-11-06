@@ -29,6 +29,9 @@ internal sealed class LocalChatProvider(
     public IReadOnlyList<string> RequestFields => options.Value.RequestFields;
 
     /// <inheritdoc/>
+    public bool AcceptsPortableFields => true;
+
+    /// <inheritdoc/>
     public int MaxTokensLimit => options.Value.MaxTokensLimit;
 
     /// <inheritdoc/>

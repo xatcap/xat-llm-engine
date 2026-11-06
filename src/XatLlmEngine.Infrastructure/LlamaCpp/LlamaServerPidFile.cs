@@ -41,19 +41,25 @@ internal static partial class LlamaServerPidFile
         HasProgramName(process.ProcessName, program)
         && (process.StartTime.ToUniversalTime() - new DateTime(startTicks, DateTimeKind.Utc)).Duration() < StartTimeTolerance;
 
-    /// <summary>Compares a process name with a program. Linux cuts process names to 15 characters, so a longer program name matches its first 15 characters.</summary>
+    /// <summary>
+    /// Compares a process name with a program. On Linux, .NET can report the full name or the name cut to 15 characters,
+    /// so both match. No other part of the name matches. The start-time check in <see cref="IsRecordedServer"/> also
+    /// protects another program with the same first 15 characters.
+    /// </summary>
     /// <param name="processName">The name that the system reports.</param>
     /// <param name="program">The llama-server path.</param>
     /// <returns><see langword="true"/> when the name belongs to the program.</returns>
     internal static bool HasProgramName(string processName, string program)
     {
         var expected = OperatingSystem.IsWindows() ? Path.GetFileNameWithoutExtension(program) : Path.GetFileName(program);
-        if (OperatingSystem.IsLinux() && expected.Length > LinuxNameLength)
+        if (string.Equals(processName, expected, StringComparison.OrdinalIgnoreCase))
         {
-            expected = expected[..LinuxNameLength];
+            return true;
         }
 
-        return string.Equals(processName, expected, StringComparison.OrdinalIgnoreCase);
+        return OperatingSystem.IsLinux()
+            && expected.Length > LinuxNameLength
+            && string.Equals(processName, expected[..LinuxNameLength], StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>Stops a server that remains after the engine was killed, and waits until it has exited.</summary>

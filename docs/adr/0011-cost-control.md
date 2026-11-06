@@ -1,6 +1,6 @@
 # 0011. Limit the cost of cloud providers with a token limit and a token budget
 
-- Status: Accepted
+- Status: Accepted, amended by [ADR 0012](0012-portable-fields.md)
 - Date: 2026-11-06
 - Deciders: Project maintainer
 
@@ -26,7 +26,9 @@ Any program on the machine can call the engine, and each cloud request costs mon
 - The counts are in hourly buckets in `usage.json` in the engine's data folder, so they survive a restart. One writer saves the newest state after each change. It writes a new file and then replaces the old one, so a crash never leaves half a file. A crash can lose the last changes.
 - A file that the engine cannot read is kept as `usage.json.corrupt-<time>`, and the counts start from zero. The engine logs an error.
 
-**Token counts in streams.** The OpenAI protocol sends token counts only when the request asks for them. When the template lists `stream_options`, the engine always adds `stream_options.include_usage`. The caller gets the usage piece only when it asked for it. When the template has no `stream_options`, the caller gets the counts whenever the provider sends them. Anthropic always sends them.
+Since ADR 0012, the engine renames portable fields before it applies the limit. The limit applies to the native token field, and its errors name the field that the caller sent.
+
+**Token counts in streams.** The OpenAI protocol sends token counts only when the request asks for them. When the template lists `stream_options`, the engine always adds `stream_options.include_usage`. The caller gets the usage piece only when it asked for it. When the template has no `stream_options`, the caller gets the counts whenever the provider sends them. Since ADR 0012, a caller can set `stream_options.include_usage` to `false` to get no counts. Anthropic always sends them.
 
 **Metrics.** Each request adds its tokens to `xat_engine.tokens`, with the tag `source` (`reported` or `estimated`).
 

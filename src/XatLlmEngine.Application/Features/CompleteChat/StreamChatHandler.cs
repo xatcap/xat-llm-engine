@@ -44,7 +44,7 @@ public sealed class StreamChatHandler(
             chat.Provider,
             chat.Request.Body,
             budget,
-            (telemetry ?? EngineTelemetry.Unregistered).Start(chat.Provider, chat.Request.Model, stream: true));
+            (telemetry ?? EngineTelemetry.Unregistered).Start(chat.Provider, chat.Request.Model, stream: true, chat.Fields.Describe()));
         if (budget.Check(chat.Provider) is { } budgetProblem)
         {
             accounting.FailedBeforeAnswer(budgetProblem.Kind);
@@ -52,8 +52,11 @@ public sealed class StreamChatHandler(
         }
 
         // The OpenAI protocol sends token counts only when the caller asks for them. The adapter asks for them always, for the
-        // budget and the metrics, so the stream gives them to the caller only when the caller asked. Other protocols always send them.
-        var forwardUsage = !chat.Provider.RequestFields.Contains(StreamOptionsField, StringComparer.Ordinal) || CallerAskedForUsage(command.Body);
+        // budget and the metrics, so the stream gives them to the caller only when the caller asked. A provider with no
+        // 'stream_options' in its template sends the counts by itself. The caller then gets them, unless the caller's portable
+        // 'stream_options' sets 'include_usage' to false. See ADR 0012.
+        var templateHasStreamOptions = chat.Provider.RequestFields.Contains(StreamOptionsField, StringComparer.Ordinal);
+        var forwardUsage = CallerAskedForUsage(command.Body) || (!templateHasStreamOptions && !command.Body.ContainsKey(StreamOptionsField));
         IAsyncEnumerator<ChatChunk>? source = null;
         var keep = false;
         try

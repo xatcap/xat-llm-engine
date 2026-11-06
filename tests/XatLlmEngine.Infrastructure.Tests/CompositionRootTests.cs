@@ -38,6 +38,19 @@ public class CompositionRootTests
         Assert.Equal(adapter, services.GetServices<IChatProvider>().Single(provider => provider.Name == "test").GetType().Name);
     }
 
+    /// <summary>Providers that use the OpenAI format accept the portable fields. Anthropic uses its own format, so it does not. See ADR 0012.</summary>
+    /// <param name="type">The configured Type.</param>
+    /// <param name="expected">Whether the provider accepts portable fields.</param>
+    [Theory]
+    [InlineData("OpenAiCompatible", true)]
+    [InlineData("Anthropic", false)]
+    public void AddInfrastructure_Type_SetsPortableFields(string type, bool expected)
+    {
+        using var services = Build(Provider(type, ("ApiKey", "secret"), ("MaxTokensLimit", "100")));
+
+        Assert.Equal(expected, services.GetServices<IChatProvider>().Single(provider => provider.Name == "test").AcceptsPortableFields);
+    }
+
     /// <summary>An Anthropic provider needs a token limit, because the Anthropic API requires one on every request.</summary>
     [Fact]
     public void AddInfrastructure_AnthropicWithoutLimit_Throws()

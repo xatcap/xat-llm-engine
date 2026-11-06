@@ -18,6 +18,11 @@ The release workflow uses the section of each version as its release notes. Writ
 - `docs/openapi.json` is the API document of the code, and each release attaches it with the release version. A test fails when the code and the file are different.
 - A deprecation rule: a deprecated item stays for at least one minor version before a removal. See ADR 0005.
 - A privacy section in `docs/operations.md`.
+- Portable fields for the local model and every OpenAI-format provider. One body works for `local`, `openai` and `mistral`, so a caller changes only `model`. The engine renames a portable field to the provider's native name. For example, `seed` becomes `random_seed` for Mistral, and `max_tokens` becomes `max_completion_tokens` for OpenAI. The engine never changes a value. Native names still work. See ADR 0012 and "Portable fields" in `docs/api.md`.
+  - Two names for one setting in one request return 400.
+  - Mistral accepts `stream_options` with only `include_usage`. The engine removes the field, and holds back the token counts when `include_usage` is `false`.
+  - A token limit error names the field that the caller sent.
+  - The `chat` trace has the tag `xat_engine.renamed_fields`, with names only.
 - Each package has a `licenses/` folder with the full license and notice texts of each third-party component. This includes the libraries inside llama.cpp and the .NET runtime. The release stops when a text is missing.
 - `Api:StreamCommitSeconds` (default 15). When a stream waits longer for its first piece, the engine sends status 200. It then sends a `: keep-alive` comment every 15 seconds. These comments stop the caller's read time limit from ending.
 - `Providers:<name>:TokenBudget` and `BudgetPeriodHours`. A provider that has used its budget in the rolling period gets 429 with the type `budget_exceeded_error`, and `/health` reports `budget_exhausted`. The counts survive a restart.
@@ -51,11 +56,12 @@ The release workflow uses the section of each version as its release notes. Writ
 
 ### Changed
 
+- The 400 message for a field that a provider does not accept now also lists the portable fields that the provider accepts. The status and the error type are the same.
 - **Breaking:** The engine no longer checks API keys from callers. The `Engine:ApiKeys` setting is removed. A configuration that still has it stops the engine at startup. The engine also no longer returns 401, and the error type `authentication_error` is gone.
 - **Breaking:** The engine refuses to start on any address other than loopback. Before, a network address was allowed when `Engine:ApiKeys` had a key.
 - **Breaking:** `/health` returns 200 in every case. Before, it returned 503 when the engine was unhealthy. Use `/health/ready` for a status code.
 - **Breaking:** `Providers:<name>:DefaultMaxTokens` is now `MaxTokensLimit`. It is also a ceiling: a request that asks for more gets 400. An Anthropic provider must set it.
-- OpenAI-format streams always ask the provider for token counts. The caller still gets the usage piece only when it set `stream_options.include_usage`.
+- For an OpenAI-format provider whose template lists `stream_options`, the engine always asks the provider for token counts in a stream. The caller still gets the usage piece only when it set `stream_options.include_usage`.
 - `/health` returns `unhealthy` when no enabled provider can take requests. Before, it returned `healthy` when no provider was enabled.
 - **Breaking:** The local model state `stopped` is now `stopping`, in `/health` and in the `xat_engine.local.state` metric.
 - **Breaking:** Only one engine can run per install folder. A second engine stops at once with a message. Before, it stopped the first engine's `llama-server`.

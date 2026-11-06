@@ -342,6 +342,34 @@ public sealed class LlamaServerSupervisorTests : IDisposable
         await Assert.ThrowsAsync<HttpRequestException>(() => client.GetAsync(healthUrl, TestContext.Current.CancellationToken));
     }
 
+    /// <summary>
+    /// The name that .NET reports for a real running server matches the program. This uses the real behaviour of each
+    /// system, so a change in .NET shows at once. A wrong rule here made the engine leave servers running on Linux.
+    /// </summary>
+    /// <returns>A task for the test.</returns>
+    [Fact]
+    public async Task PidFile_RealProcessName_MatchesProgram()
+    {
+        var program = LlamaServerPaths.ServerProgram(Options());
+        using var server = Process.Start(new ProcessStartInfo(program, ["--port", "0"]) { RedirectStandardOutput = true })!;
+        try
+        {
+            await Task.Delay(500, TestContext.Current.CancellationToken);
+            Assert.False(server.HasExited, "The stand-in must be running, or this test proves nothing.");
+
+            Assert.True(
+                LlamaServerPidFile.HasProgramName(server.ProcessName, program),
+                $"The system reports the name '{server.ProcessName}' for '{program}'.");
+        }
+        finally
+        {
+            if (!server.HasExited)
+            {
+                server.Kill();
+            }
+        }
+    }
+
     /// <summary>The next engine start stops a server that remains after the engine was killed.</summary>
     /// <returns>A task for the test.</returns>
     [Fact]

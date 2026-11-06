@@ -13,7 +13,7 @@
         "summary": "Generates a chat answer, in one piece or as a stream.",
         "description": "Set 'stream' to true to receive server-sent events (text/event-stream) instead of JSON. Swagger UI shows a stream only after it has finished.",
         "requestBody": {
-          "description": "The chat request, in the format of the provider named in 'model'. A field that provider does not list returns a 400 error.",
+          "description": "The chat request, in the format of the provider named in 'model'. Providers that use the OpenAI format also accept the portable fields. A field that the provider does not accept returns a 400 error.",
           "content": {
             "application/json": {
               "schema": {

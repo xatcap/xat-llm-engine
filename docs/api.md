@@ -7,13 +7,14 @@ This page is for programs that call the engine. The engine listens at `http://12
 - Callers send plain HTTP requests, or use a client library.
 - The model name selects the provider, for example `local/ministral-3-3b` or `anthropic/claude-sonnet-5-5`.
 - Each provider has its own request template, in that provider's native format. See [Request templates](#request-templates).
+- Providers that use the OpenAI format also accept the portable fields. With only portable fields, a caller changes only `model` to move between `local`, `openai` and `mistral`. See [Portable fields](#portable-fields).
 - Every provider returns the same OpenAI-style response format, the same errors and the same health values.
 - Local requests go to a [llama.cpp](https://github.com/ggml-org/llama.cpp) `llama-server` process. The engine starts and supervises this process.
 - Cloud requests go directly to the vendor's API.
 
 ### Client libraries
 
-OpenAI client libraries work for these OpenAI-format providers:
+OpenAI client libraries work for these OpenAI-format providers, with the same arguments for each one:
 
 - `local`
 - `openai`
@@ -56,7 +57,7 @@ for chunk in client.chat.completions.create(
 
 ## Request templates
 
-Each provider accepts only the fields in its template. The engine forwards these fields to the provider unchanged, and it checks only the token field. A bad value returns the vendor's own 400 message. This section is the contract for the values that the engine adds.
+Each provider accepts the fields in its template. Providers that use the OpenAI format also accept the [portable fields](#portable-fields), and the engine renames them to the names of the template. The engine forwards the values unchanged. It checks the token field, and `stream_options` for a template that has none. For other fields, a bad value returns the vendor's own 400 message. This section is the contract for the values that the engine adds.
 
 | Provider | Accepted fields |
 |---|---|
@@ -68,17 +69,48 @@ Each provider accepts only the fields in its template. The engine forwards these
 These rules apply to every provider:
 
 - `model` and `stream` are always accepted.
-- Any other top-level field that the template does not list returns a 400 error. The error names the field and lists the accepted fields. This happens even when the field's value is `null` or a default.
+- Any other top-level field that the template does not list, and that is not a portable field, returns a 400 error. The error names the field and lists the accepted fields. This happens even when the field's value is `null` or a default.
 - The local model uses `LocalModel__DefaultTemperature` when a request sends no `temperature`.
-- A provider with a `MaxTokensLimit` refuses a token value above the limit. It also refuses a token value that is not a whole number of at least 1. Both return a 400 error. A request with no token field gets the limit. The token field is the first of `max_tokens` and `max_completion_tokens` in the template. Anthropic requires a limit. Its default is 4096.
+- A provider with a `MaxTokensLimit` refuses a token value above the limit. It also refuses a token value that is not a number, or that is not a whole number of at least 1. These checks return a 400 error. A request with no token field gets the limit. The token field is the first of `max_tokens` and `max_completion_tokens` in the template. Anthropic requires a limit. Its default is 4096.
 
 Streaming usage depends on the provider:
 
-- OpenAI-format providers send a usage piece only when the caller sets `stream_options.include_usage`. The engine always asks the provider for the counts, because the budget and the metrics need them. It gives the counts to the caller only when the caller asked.
-- Mistral's template has no `stream_options`. The engine gives Mistral's counts to the caller when Mistral sends them.
+- An OpenAI-format provider whose template lists `stream_options` sends a usage piece only when it is asked for one. The engine always asks for the counts, because the budget and the metrics need them. It gives the counts to the caller only when the caller sets `stream_options.include_usage`.
+- Mistral's template has no `stream_options`. The engine gives Mistral's counts to the caller when Mistral sends them, unless the caller sets `stream_options.include_usage` to `false`.
 - Anthropic streams always end with a usage piece. Its `choices` is empty.
 
 To change a template, edit `RequestFields`. See [Configuration](configuration.md#request-fields).
+
+## Portable fields
+
+The local model and every provider with `Type: OpenAiCompatible` accept the portable fields. A body with only portable fields works for all of them. Change only `model`.
+
+| Portable field | `local` | `openai` | `mistral` |
+|---|---|---|---|
+| `messages`, `temperature`, `top_p`, `stop`, `frequency_penalty`, `presence_penalty`, `response_format` | the same | the same | the same |
+| `max_tokens` | `max_tokens` | `max_completion_tokens` | `max_tokens` |
+| `max_completion_tokens` | `max_tokens` | `max_completion_tokens` | `max_tokens` |
+| `seed` | `seed` | `seed` | `random_seed` |
+| `stream_options` | the same | the same | removed. See below. |
+
+These rules apply:
+
+- The engine renames a portable field to the name in the provider's template. It never changes a value.
+- The native names also work, with no change. For example, `random_seed` still works for `mistral`.
+- Two names for one setting in one request return a 400 error. An example is `seed` and `random_seed` to `mistral`.
+- The token limit applies after the rename. Its errors name the field that you sent.
+- For `mistral`, `stream_options` can hold only `include_usage`. Other content returns a 400 error.
+  - The engine removes the field from the request, because Mistral does not accept it.
+  - With `include_usage` set to `false`, you get no token counts in a stream.
+  - With `true`, or with no `stream_options`, you get the counts that Mistral sends. The engine cannot make a provider send counts.
+- A field that is not portable works only with the providers that list it, for example `grammar`, `reasoning_effort` and `safe_prompt`. Other providers return a 400 error that says that the field is not portable.
+- Anthropic does not rename the portable fields. A portable name works there only when its template lists it, such as `messages`, `temperature`, `top_p` or `max_tokens`. Other portable names return a 400 error. Use Anthropic's own template.
+
+> [!NOTE]
+>
+> Portable means the same names, not the same results. Each vendor has its own value ranges and defaults. For example, the local model uses a default temperature of 0.07, and the cloud vendors use their own default. A `seed` does not give the same text on two providers. For a portable body, use only the `text` and `json_object` types of `response_format`. Other types depend on the vendor, and the engine does not check them. On OpenAI reasoning models, `max_completion_tokens` also counts the reasoning tokens, so a low limit can give an empty answer.
+
+[ADR 0012](adr/0012-portable-fields.md) describes the rules.
 
 ## Content rules
 

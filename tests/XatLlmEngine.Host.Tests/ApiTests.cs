@@ -622,6 +622,27 @@ public class ApiTests
         Assert.False(providers.Single(entry => entry.GetProperty("name").GetString() == "local").TryGetProperty("budget", out _));
     }
 
+    /// <summary>A portable request reaches a Mistral-like provider with its native names, and two names for one setting get 400. See ADR 0012.</summary>
+    /// <returns>A task for the test.</returns>
+    [Fact]
+    public async Task Chat_PortableFields_AreRenamedEndToEnd()
+    {
+        await using var engine = new EngineFactory();
+        engine.Provider.AcceptsPortableFields = true;
+        engine.Provider.RequestFields = ["messages", "max_tokens", "random_seed"];
+
+        using var portable = await PostAsync(engine, """{"model":"fake/model-a","messages":[{"role":"user","content":"Hi"}],"max_completion_tokens":20,"seed":3}""");
+        var sent = engine.Provider.LastRequest!.Body;
+        using var conflict = await PostAsync(engine, """{"model":"fake/model-a","messages":[],"seed":3,"random_seed":3}""");
+
+        Assert.Equal(HttpStatusCode.OK, portable.StatusCode);
+        Assert.Equal(20, sent["max_tokens"]!.GetValue<int>());
+        Assert.Equal(3, sent["random_seed"]!.GetValue<int>());
+        Assert.False(sent.ContainsKey("seed"));
+        Assert.Equal(HttpStatusCode.BadRequest, conflict.StatusCode);
+        await AssertErrorFormatAsync(conflict, "invalid_request_error");
+    }
+
     /// <summary>Posts a chat request.</summary>
     /// <param name="engine">The hosted engine.</param>
     /// <param name="body">The request body.</param>

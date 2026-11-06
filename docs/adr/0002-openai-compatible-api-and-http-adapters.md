@@ -1,6 +1,6 @@
 # 0002. Expose an OpenAI-compatible API, with plain HTTP adapters
 
-- Status: Partly replaced by [ADR 0004](0004-one-request-template-per-provider.md)
+- Status: Partly replaced by [ADR 0004](0004-one-request-template-per-provider.md). [ADR 0012](0012-portable-fields.md) gives back one request format for the portable fields.
 - Date: 2026-11-04
 - Deciders: Project maintainer
 

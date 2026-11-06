@@ -1,6 +1,6 @@
 # 0004. Give each provider its own request template
 
-- Status: Accepted
+- Status: Accepted, amended. [ADR 0012](0012-portable-fields.md) adds portable field names.
 - Date: 2026-11-05
 - Deciders: Project maintainer
 
@@ -35,6 +35,10 @@ The engine adds these values to the request it sends. It never changes a value t
 - An OpenAI-format provider whose template lists `stream_options` gets `stream_options.include_usage` in a stream.
 
 The engine also checks the token field against the limit, and refuses tool content inside `messages` (ADR 0002).
+
+## Amendment 2 (2026-11-06)
+
+[ADR 0012](0012-portable-fields.md) changes the rule "callers send the native format" for the providers that use the OpenAI format. These providers also accept portable field names, and the engine renames them to the native names. The engine still never changes a value. For a template with no `stream_options`, the engine also checks the caller's `stream_options` and removes it. Anthropic is not changed.
 
 ## Alternatives considered
 
