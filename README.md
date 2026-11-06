@@ -1,3 +1,10 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/xatcap-logo-dark.svg">
+    <img src="docs/assets/xatcap-logo.svg" alt="The xatcap logo: a cat with sunglasses and a witch hat" width="160">
+  </picture>
+</p>
+
 # xat-llm-engine
 
 LLM bridge for local or cloud models. It gives other programs one HTTP API for a bundled local model and for cloud providers such as Anthropic, OpenAI and Mistral.
