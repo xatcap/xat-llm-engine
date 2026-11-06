@@ -6,6 +6,8 @@ The release workflow uses the section of each version as its release notes. Writ
 
 ## [Unreleased]
 
+## [1.0.2] - 2026-11-06
+
 ### Added
 
 - Support for apps that include the engine. See `docs/embedding.md`.
