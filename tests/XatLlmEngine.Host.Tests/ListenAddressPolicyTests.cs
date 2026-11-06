@@ -18,7 +18,6 @@ public class ListenAddressPolicyTests
     [InlineData("urls", "http://[::ffff:127.0.0.1]:8420")]
     [InlineData("urls", "http://LOCALHOST:8420")]
     [InlineData("urls", " http://127.0.0.1:8420 ; http://[::1]:8421 ")]
-    [InlineData("urls", "http://unix:/tmp/xat-engine.sock")]
     [InlineData("urls", "http://127.0.0.1:0")]
     [InlineData("urls", "http://[::1]:0")]
     [InlineData("Kestrel:Endpoints:Main:Url", "")]
@@ -48,6 +47,29 @@ public class ListenAddressPolicyTests
     public void EnsureAllowed_Network_Throws(string key, string value)
     {
         Assert.Throws<InvalidOperationException>(() => ListenAddressPolicy.EnsureAllowed(Configuration((key, value))));
+    }
+
+    /// <summary>A Unix socket is reachable only from this machine. Windows does not accept the path <c>/tmp/...</c>, so the test runs only on macOS and Linux.</summary>
+    [Fact]
+    public void EnsureAllowed_UnixSocket_Passes()
+    {
+        Assert.SkipWhen(OperatingSystem.IsWindows(), "Windows does not accept a Unix socket path such as /tmp/xat-engine.sock.");
+
+        ListenAddressPolicy.EnsureAllowed(Configuration(("urls", "http://unix:/tmp/xat-engine.sock")));
+    }
+
+    /// <summary>An address with the wrong format stops the engine with the same kind of error as the other address checks, and the message names the address.</summary>
+    /// <param name="key">The setting that holds the address.</param>
+    /// <param name="value">The value.</param>
+    [Theory]
+    [InlineData("urls", "127.0.0.1:8420")]
+    [InlineData("Kestrel:Endpoints:Main:Url", "127.0.0.1:8420")]
+    public void EnsureAllowed_WrongFormat_ThrowsClearMessage(string key, string value)
+    {
+        var failure = Assert.Throws<InvalidOperationException>(() => ListenAddressPolicy.EnsureAllowed(Configuration((key, value))));
+
+        Assert.Contains("cannot read the listening address", failure.Message, StringComparison.Ordinal);
+        Assert.IsType<FormatException>(failure.InnerException);
     }
 
     /// <summary>Port 0 on the name localhost stops the engine with a clear message, because the server cannot use it.</summary>

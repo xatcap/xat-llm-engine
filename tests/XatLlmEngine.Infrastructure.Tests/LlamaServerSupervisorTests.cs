@@ -86,13 +86,15 @@ public sealed class LlamaServerSupervisorTests : IDisposable
     /// <summary>The engine finds the same config files as llama.cpp on Linux and macOS.</summary>
     /// <param name="xdgConfigHome">The value of XDG_CONFIG_HOME.</param>
     /// <param name="home">The value of HOME.</param>
-    /// <param name="expectedFolder">The folder that holds the user's file.</param>
+    /// <param name="expectedFolder">The folder that holds the user's file, or <see langword="null"/> for <c>.config</c> in HOME.</param>
+    /// <remarks>The test builds the HOME folder with <see cref="Path.Combine(string, string)"/>, as the code does, so that it also runs on a Windows host.</remarks>
     [Theory]
     [InlineData("/x/config", "/home/u", "/x/config")]
-    [InlineData("", "/home/u", "/home/u/.config")]
-    [InlineData(null, "/home/u", "/home/u/.config")]
-    public void ConfigFiles_Unix_FollowsLlamaRules(string? xdgConfigHome, string home, string expectedFolder)
+    [InlineData("", "/home/u", null)]
+    [InlineData(null, "/home/u", null)]
+    public void ConfigFiles_Unix_FollowsLlamaRules(string? xdgConfigHome, string home, string? expectedFolder)
     {
+        expectedFolder ??= Path.Combine(home, ".config");
         var files = LlamaServerPaths.ConfigFiles(isWindows: false, name => name switch
         {
             "XDG_CONFIG_HOME" => xdgConfigHome,

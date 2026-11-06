@@ -80,7 +80,7 @@ public sealed class EmbeddingLifecycleTests : IDisposable
         File.WriteAllText(ReadyFilePath, """{"url":"http://127.0.0.1:1","pid":1,"version":"0.0.0"}""");
         using var engine = Start();
 
-        await WaitUntilAsync(() => engine.HasExited || (File.Exists(ReadyFilePath) && File.ReadAllText(ReadyFilePath).Contains($"\"pid\":{engine.Id}", StringComparison.Ordinal)));
+        await WaitUntilAsync(() => engine.HasExited || HoldsPid(engine.Id));
 
         Assert.False(engine.HasExited);
         engine.StandardInput.Close();
@@ -218,6 +218,21 @@ public sealed class EmbeddingLifecycleTests : IDisposable
         {
             engine.Kill(entireProcessTree: true);
             Assert.Fail("The engine did not stop in time.");
+        }
+    }
+
+    /// <summary>Tells whether the ready file holds a process ID. The engine can replace the file during the read, so a failed read means "not yet".</summary>
+    /// <param name="pid">The process ID.</param>
+    /// <returns><see langword="true"/> when the file holds the ID.</returns>
+    private bool HoldsPid(int pid)
+    {
+        try
+        {
+            return File.Exists(ReadyFilePath) && File.ReadAllText(ReadyFilePath).Contains($"\"pid\":{pid}", StringComparison.Ordinal);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return false;
         }
     }
 

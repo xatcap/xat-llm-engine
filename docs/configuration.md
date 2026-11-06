@@ -115,7 +115,7 @@ The engine checks every entry in `LocalModel` and `Providers` at startup, also a
 - An Anthropic provider with a `MaxTokensLimit` below 1.
 - A `MaxTokensLimit` above 0 when `RequestFields` has no `max_tokens` and no `max_completion_tokens`.
 - A value that is out of range or has the wrong format.
-- A listening address on the network, or `localhost` with port 0.
+- A listening address that has the wrong format, is on the network, or is `localhost` with port 0.
 - An `Engine:ReadyFile` path that is not valid, or that is in a folder that does not exist.
 
 ## Change the local model

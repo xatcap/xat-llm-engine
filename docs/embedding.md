@@ -194,4 +194,4 @@ await engine.WaitForExitAsync();
 
 ## Unix sockets
 
-On macOS and Linux, the engine can also listen on a Unix socket, for example `Urls=http://unix:/path/to/engine.sock`. The file permissions of the socket then decide which users can connect. Most OpenAI client libraries cannot use a Unix socket.
+On macOS and Linux, the engine can also listen on a Unix socket, for example `Urls=http://unix:/path/to/engine.sock`. The file permissions of the socket then decide which users can connect. Most OpenAI client libraries cannot use a Unix socket. On Windows, the engine refuses a socket path such as `/tmp/engine.sock` at startup, because it is not a Windows path.

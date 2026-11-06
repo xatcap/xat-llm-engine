@@ -11,40 +11,52 @@ internal static class ListenAddressPolicy
     /// Also refuses port 0 on <c>localhost</c>, which the server cannot use.
     /// </summary>
     /// <param name="configuration">The application configuration.</param>
-    /// <exception cref="InvalidOperationException">The API would be open to the network, or the address cannot work.</exception>
+    /// <exception cref="InvalidOperationException">The API would be open to the network, or an address has the wrong format or cannot work.</exception>
     public static void EnsureAllowed(IConfiguration configuration)
     {
-        var addresses = ConfiguredAddresses(configuration).ToList();
-        var exposed = addresses.FirstOrDefault(address => !IsLoopback(address));
-        if (exposed is not null)
+        var addresses = ConfiguredAddresses(configuration).Select(address => (Text: address, Binding: Parse(address))).ToList();
+        var exposed = addresses.FirstOrDefault(address => !IsLoopback(address.Binding));
+        if (exposed.Text is not null)
         {
             throw new InvalidOperationException(
-                $"The configuration makes the engine listen on {exposed}. The API has no authentication, so listen on 127.0.0.1 only.");
+                $"The configuration makes the engine listen on {exposed.Text}. The API has no authentication, so listen on 127.0.0.1 only.");
         }
 
-        var dynamicLocalhost = addresses.FirstOrDefault(IsDynamicLocalhost);
-        if (dynamicLocalhost is not null)
+        var dynamicLocalhost = addresses.FirstOrDefault(address => IsDynamicLocalhost(address.Binding));
+        if (dynamicLocalhost.Text is not null)
         {
             throw new InvalidOperationException(
-                $"The configuration makes the engine listen on {dynamicLocalhost}. The server cannot use port 0 with 'localhost'. Use http://127.0.0.1:0 instead.");
+                $"The configuration makes the engine listen on {dynamicLocalhost.Text}. The server cannot use port 0 with 'localhost'. Use http://127.0.0.1:0 instead.");
+        }
+    }
+
+    /// <summary>Reads a listening address. An address with the wrong format stops the engine with a message that names the address.</summary>
+    /// <param name="address">A listening address.</param>
+    /// <returns>The parts of the address.</returns>
+    /// <exception cref="InvalidOperationException">The address has the wrong format.</exception>
+    private static BindingAddress Parse(string address)
+    {
+        try
+        {
+            return BindingAddress.Parse(address);
+        }
+        catch (FormatException exception)
+        {
+            throw new InvalidOperationException($"The engine cannot read the listening address '{address}'. {exception.Message}", exception);
         }
     }
 
     /// <summary>Tells whether an address asks for a port that the system chooses on the name <c>localhost</c>.</summary>
-    /// <param name="address">A listening address.</param>
+    /// <param name="binding">The parts of a listening address.</param>
     /// <returns><see langword="true"/> for <c>localhost</c> with port 0.</returns>
-    internal static bool IsDynamicLocalhost(string address)
-    {
-        var binding = BindingAddress.Parse(address);
-        return !binding.IsUnixPipe && binding.Port == 0 && string.Equals(binding.Host, "localhost", StringComparison.OrdinalIgnoreCase);
-    }
+    private static bool IsDynamicLocalhost(BindingAddress binding) =>
+        !binding.IsUnixPipe && binding.Port == 0 && string.Equals(binding.Host, "localhost", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>Tells whether an address is reachable only from this machine.</summary>
-    /// <param name="address">A listening address, for example <c>http://127.0.0.1:8420</c>.</param>
+    /// <param name="binding">The parts of a listening address, for example <c>http://127.0.0.1:8420</c>.</param>
     /// <returns><see langword="true"/> for loopback addresses and Unix sockets.</returns>
-    internal static bool IsLoopback(string address)
+    private static bool IsLoopback(BindingAddress binding)
     {
-        var binding = BindingAddress.Parse(address);
         return binding.IsUnixPipe
             || string.Equals(binding.Host, "localhost", StringComparison.OrdinalIgnoreCase)
             || (IPAddress.TryParse(binding.Host, out var ip) && IPAddress.IsLoopback(ip));

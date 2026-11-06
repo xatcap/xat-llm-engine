@@ -82,6 +82,10 @@ The release workflow uses the section of each version as its release notes. Writ
 - NuGet packages are pinned in a `packages.lock.json` file for each project. CI and the release restore in locked mode.
 - The release workflow runs all tests on all platforms before it builds a package.
 
+### Fixed
+
+- A listening address with the wrong format in `Urls` or `Kestrel:Endpoints` now stops the engine with the same kind of startup error as the other address checks, and the message names the address. Before, the engine stopped with an error from ASP.NET.
+
 ## [1.0.1] - 2026-11-05
 
 ### Changed
