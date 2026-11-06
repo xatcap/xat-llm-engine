@@ -28,6 +28,10 @@ dotnet_diagnostic.SA1600.severity = warning
 dotnet_diagnostic.SA1601.severity = warning
 dotnet_diagnostic.SA1602.severity = warning
 
+# A switch over an enum lists every named value and has no '_' arm, so that a new value fails the build (CS8509).
+# CS8524 asks for an arm for numbers that have no name. Such a number is a bug, and the switch then throws.
+dotnet_diagnostic.CS8524.severity = none
+
 # Public test classes and Host types are not a library surface, so this advice does not apply.
 dotnet_diagnostic.CA1515.severity = none
 

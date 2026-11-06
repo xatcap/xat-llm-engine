@@ -1,11 +1,13 @@
 <Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <!-- 'dotnet publish' of the Host gives its runtime to this project too, so the lock file must pin the packages of each release platform. -->
+    <RuntimeIdentifiers>osx-arm64;linux-x64;win-x64</RuntimeIdentifiers>
+  </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\XatLlmEngine.Application\XatLlmEngine.Application.csproj" />
     <PackageReference Include="Microsoft.Extensions.Configuration.Binder" />
-    <PackageReference Include="Microsoft.Extensions.Diagnostics.HealthChecks" />
     <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" />
     <PackageReference Include="Microsoft.Extensions.Http" />
-    <PackageReference Include="Microsoft.Extensions.Http.Resilience" />
     <PackageReference Include="Microsoft.Extensions.Options.DataAnnotations" />
   </ItemGroup>
   <ItemGroup>

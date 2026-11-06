@@ -9,6 +9,9 @@ internal enum LlamaServerState
     /// <summary>The model is loaded and can serve requests.</summary>
     Ready,
 
+    /// <summary>The server is busy and does not answer its health checks. New requests wait for it to recover, and requests in progress continue.</summary>
+    Unresponsive,
+
     /// <summary>The server stopped unexpectedly after it was ready. The engine will start it again after a delay.</summary>
     Restarting,
 

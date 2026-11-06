@@ -47,6 +47,16 @@ public class DependencyRuleTests
         Assert.True(result.IsSuccessful, Describe(result));
     }
 
+    /// <summary>The Host uses Infrastructure only to register it. The public API, such as the health states, must not depend on adapter types.</summary>
+    [Fact]
+    public void Host_DoesNotUseAdapterTypes()
+    {
+        var result = Types.InAssembly(typeof(Program).Assembly).ShouldNot().HaveDependencyOnAny(
+            "XatLlmEngine.Infrastructure.LlamaCpp", "XatLlmEngine.Infrastructure.Providers").GetResult();
+
+        Assert.True(result.IsSuccessful, Describe(result));
+    }
+
     /// <summary>Adapters are reachable only through the ports they implement.</summary>
     [Fact]
     public void Adapters_AreInternalAndSealed()

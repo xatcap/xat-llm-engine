@@ -16,6 +16,9 @@ internal sealed class FakeProvider : IChatProvider
     /// <inheritdoc/>
     public IReadOnlyList<string> RequestFields { get; } = ["messages", "temperature", "stream_options"];
 
+    /// <inheritdoc/>
+    public TokenBudget? Budget { get; set; }
+
     /// <summary>Gets or sets the chunks to stream.</summary>
     public IReadOnlyList<ChatChunk> Chunks { get; set; } = [];
 
@@ -30,6 +33,12 @@ internal sealed class FakeProvider : IChatProvider
 
     /// <summary>Gets the most recent request.</summary>
     public ChatRequest? LastRequest { get; private set; }
+
+    /// <summary>Gets or sets a task that the stream waits for before its first chunk, or <see langword="null"/> for no wait.</summary>
+    public TaskCompletionSource? FirstChunkGate { get; set; }
+
+    /// <summary>Gets a task that completes when a stream starts to read.</summary>
+    public TaskCompletionSource StreamStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     /// <inheritdoc/>
     public Task<Result<ChatCompletion>> CompleteAsync(ChatRequest request, CancellationToken cancellationToken)
@@ -59,6 +68,12 @@ internal sealed class FakeProvider : IChatProvider
     /// <returns>The chunks.</returns>
     private async IAsyncEnumerable<ChatChunk> ReadAsync([EnumeratorCancellation] CancellationToken cancellationToken)
     {
+        StreamStarted.TrySetResult();
+        if (FirstChunkGate is not null)
+        {
+            await FirstChunkGate.Task.WaitAsync(cancellationToken);
+        }
+
         foreach (var chunk in Chunks)
         {
             cancellationToken.ThrowIfCancellationRequested();

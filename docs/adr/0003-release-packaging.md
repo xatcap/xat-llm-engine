@@ -10,9 +10,23 @@ Each release must ship llama.cpp and a local model. GitHub requires each release
 
 ## Decision
 
-Each release has one self-contained package per platform (macOS arm64, Linux x64, Windows x64), with llama.cpp in its `llama/` folder. The model is one separate file on the release, not part of any package. The engine never downloads anything: users download the package and the model, and place the model in `models/`.
+Each release has one self-contained package for each platform:
 
-`build/llama-cpp.lock.json` and `build/model.lock.json` pin every input by SHA-256. The release workflow runs each package with the real model before it publishes anything. The release stays a draft until all files are uploaded.
+- macOS arm64
+- Linux x64
+- Windows x64
+
+Each package has llama.cpp in its `llama/` folder. The model is one separate file on the release, not part of any package. The engine never downloads anything. Users download the package and the model, and they place the model in `models/`.
+
+`build/llama-cpp.lock.json` and `build/model.lock.json` pin llama.cpp and the model by SHA-256. A `packages.lock.json` file in each project pins every NuGet package by its content hash, and the build restores in locked mode. The release workflow runs all tests before it builds the packages. Then it runs each package with the real model before it publishes anything. The release stays a draft until all files are uploaded.
+
+Each package has a `licenses/` folder. The folder holds the full license and notice texts of each third-party component that the package ships. These components are:
+
+- llama.cpp and the libraries inside it
+- the .NET runtime and ASP.NET Core, from the exact runtime packs of the build
+- each NuGet package
+
+`build/third-party.json` lists them. The release script stops when a shipped package is not in that list. It also stops when a text is missing. The smoke test checks that each text is in the package. (Added 2026-11-06.)
 
 ## Consequences
 

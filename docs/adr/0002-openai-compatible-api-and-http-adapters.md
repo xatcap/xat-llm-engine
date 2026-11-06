@@ -19,6 +19,11 @@ Adapters use `HttpClient` directly rather than vendor SDKs. One `OpenAiCompatibl
 - To use an existing OpenAI client, change its base URL and model name.
 - A new compatible vendor needs only configuration. All providers share the same streaming and error behaviour.
 - Unsupported features such as tools return a 400 error. The engine does not ignore them silently. A developer must add each new feature to the adapters.
+- The engine also checks inside `messages`. A message gets a 400 error, for every provider, when it has one of these:
+  - the role `tool` or `function`,
+  - the field `tool_calls` or `function_call`,
+  - a tool content block, such as `tool_use` or `tool_result`.
+  Images pass unchanged. (Added 2026-11-06.)
 - The engine must track vendor API changes itself, without help from an SDK update.
 
 ## Alternatives considered

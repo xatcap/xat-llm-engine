@@ -1,6 +1,10 @@
 <Project Sdk="Microsoft.NET.Sdk.Web">
   <PropertyGroup>
     <InvariantGlobalization>true</InvariantGlobalization>
+    <!-- The lock file must also pin the runtime packs of each release platform. -->
+    <RuntimeIdentifiers>osx-arm64;linux-x64;win-x64</RuntimeIdentifiers>
+    <!-- The release is one file. This setting is here, not on the publish command line, because it adds a build package that the lock file must pin. It has an effect only on 'dotnet publish'. -->
+    <PublishSingleFile>true</PublishSingleFile>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\XatLlmEngine.Application\XatLlmEngine.Application.csproj" />

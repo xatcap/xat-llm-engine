@@ -19,6 +19,12 @@ internal sealed class OpenAiCompatibleChatProvider(string name, ProviderOptions 
     public IReadOnlyList<string> RequestFields => options.RequestFields;
 
     /// <inheritdoc/>
+    public int MaxTokensLimit => options.MaxTokensLimit;
+
+    /// <inheritdoc/>
+    public TokenBudget? Budget => options.TokenBudget > 0 ? new TokenBudget(options.TokenBudget, TimeSpan.FromHours(options.BudgetPeriodHours)) : null;
+
+    /// <inheritdoc/>
     public Task<Result<ChatCompletion>> CompleteAsync(ChatRequest request, CancellationToken cancellationToken) =>
         client.CompleteAsync(options.BaseUrl!, options.ApiKey!, request, cancellationToken);
 

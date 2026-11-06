@@ -14,36 +14,53 @@ internal static partial class LlamaServerPidFile
     /// <summary>The largest difference between two readings of a process's start time. Some systems calculate it slightly differently each time.</summary>
     private static readonly TimeSpan StartTimeTolerance = TimeSpan.FromSeconds(5);
 
-    /// <summary>Builds a PID file path unique to this install. The file is in the user's private data folder. In a shared temp folder, another user can put a link there, and this process then writes through the link.</summary>
+    /// <summary>The longest wait for a leftover server to exit after the engine stops it.</summary>
+    private static readonly TimeSpan LeftoverExitTimeout = TimeSpan.FromSeconds(10);
+
+    /// <summary>The length to which Linux cuts a process name.</summary>
+    private const int LinuxNameLength = 15;
+
+    /// <summary>The name of the PID file in the data folder.</summary>
+    internal const string FileName = "llama-server.pid";
+
+    /// <summary>Builds the PID file path of engine versions before the data folder. The engine reads this file once, so that an update does not leave a server running.</summary>
     /// <param name="program">The llama-server path.</param>
-    /// <returns>The PID file path.</returns>
-    public static string PidFilePath(string program)
+    /// <returns>The old PID file path.</returns>
+    public static string LegacyPidFilePath(string program)
     {
         var hash = Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(program)))[..16];
-        var dataFolder = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-        return Path.Combine(string.IsNullOrEmpty(dataFolder) ? AppContext.BaseDirectory : dataFolder, "xat-llm-engine", $"llama-server-{hash}.pid");
+        return Path.Combine(EngineDataFolder.Root(), "xat-llm-engine", $"llama-server-{hash}.pid");
     }
 
-    /// <summary>Builds the text of a PID file. The start time identifies the process, because the system can give the same ID to a later process.</summary>
-    /// <param name="process">The running process.</param>
-    /// <returns>The file's text.</returns>
-    public static string FormatPidRecord(Process process) =>
-        string.Create(CultureInfo.InvariantCulture, $"{process.Id} {process.StartTime.ToUniversalTime().Ticks}");
-
-    /// <summary>Tells whether a PID file describes this exact process: the same name and the same start time.</summary>
+    /// <summary>Tells whether a PID file describes this exact process: the same program and the same start time.</summary>
     /// <param name="process">The process that now has the recorded ID.</param>
     /// <param name="startTicks">The recorded start time, in UTC ticks.</param>
     /// <param name="program">The llama-server path.</param>
     /// <returns><see langword="true"/> when the process is the recorded server.</returns>
     private static bool IsRecordedServer(Process process, long startTicks, string program) =>
-        string.Equals(
-            process.ProcessName,
-            OperatingSystem.IsWindows() ? Path.GetFileNameWithoutExtension(program) : Path.GetFileName(program),
-            StringComparison.OrdinalIgnoreCase)
+        HasProgramName(process.ProcessName, program)
         && (process.StartTime.ToUniversalTime() - new DateTime(startTicks, DateTimeKind.Utc)).Duration() < StartTimeTolerance;
 
-    /// <summary>Stops a server that remains after the engine was killed.</summary>
-    /// <remarks>This method checks the name and start time first, because the system can give the old ID to an unrelated program.</remarks>
+    /// <summary>Compares a process name with a program. Linux cuts process names to 15 characters, so a longer program name matches its first 15 characters.</summary>
+    /// <param name="processName">The name that the system reports.</param>
+    /// <param name="program">The llama-server path.</param>
+    /// <returns><see langword="true"/> when the name belongs to the program.</returns>
+    internal static bool HasProgramName(string processName, string program)
+    {
+        var expected = OperatingSystem.IsWindows() ? Path.GetFileNameWithoutExtension(program) : Path.GetFileName(program);
+        if (OperatingSystem.IsLinux() && expected.Length > LinuxNameLength)
+        {
+            expected = expected[..LinuxNameLength];
+        }
+
+        return string.Equals(processName, expected, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>Stops a server that remains after the engine was killed, and waits until it has exited.</summary>
+    /// <remarks>
+    /// This method checks the name and start time first, because the system can give the old ID to an unrelated program.
+    /// The caller must hold the instance lock, so that this server cannot belong to another running engine.
+    /// </remarks>
     /// <param name="pidFile">The PID file path.</param>
     /// <param name="program">The llama-server path.</param>
     /// <param name="logger">The log.</param>
@@ -63,6 +80,13 @@ internal static partial class LlamaServerPidFile
             if (IsRecordedServer(leftover, startTicks, program))
             {
                 leftover.Kill(entireProcessTree: true);
+
+                // The old server holds memory and maybe the GPU. The new server must not start before it is gone.
+                if (!leftover.WaitForExit(LeftoverExitTimeout))
+                {
+                    LogLeftoverSlow(logger, pid, LeftoverExitTimeout);
+                }
+
                 LogStoppedLeftover(logger, pid);
             }
         }
@@ -81,16 +105,6 @@ internal static partial class LlamaServerPidFile
     {
         try
         {
-            var folder = Path.GetDirectoryName(pidFile)!;
-            if (OperatingSystem.IsWindows())
-            {
-                Directory.CreateDirectory(folder);
-            }
-            else
-            {
-                Directory.CreateDirectory(folder, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
-            }
-
             File.WriteAllText(pidFile, record);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
@@ -119,6 +133,13 @@ internal static partial class LlamaServerPidFile
     /// <param name="pid">The process ID.</param>
     [LoggerMessage(Level = LogLevel.Warning, Message = "The engine stopped a llama-server from an earlier run, process {Pid}.")]
     private static partial void LogStoppedLeftover(ILogger logger, int pid);
+
+    /// <summary>Logs a leftover server that did not exit in time.</summary>
+    /// <param name="logger">The log.</param>
+    /// <param name="pid">The process ID.</param>
+    /// <param name="timeout">The wait.</param>
+    [LoggerMessage(Level = LogLevel.Warning, Message = "The llama-server from an earlier run, process {Pid}, did not exit within {Timeout}.")]
+    private static partial void LogLeftoverSlow(ILogger logger, int pid, TimeSpan timeout);
 
     /// <summary>Logs why the leftover check found nothing to stop.</summary>
     /// <param name="logger">The log.</param>

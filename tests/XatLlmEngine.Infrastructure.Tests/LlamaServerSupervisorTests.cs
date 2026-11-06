@@ -4,6 +4,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using XatLlmEngine.Domain;
 using XatLlmEngine.Infrastructure.LlamaCpp;
+using XatLlmEngine.Infrastructure.Providers;
 using XatLlmEngine.Infrastructure.Providers.OpenAiCompatible;
 
 namespace XatLlmEngine.Infrastructure.Tests;
@@ -23,14 +24,24 @@ public sealed class LlamaServerSupervisorTests : IDisposable
     /// <summary>A file that stands in for the model.</summary>
     private readonly string modelFile = Path.GetTempFileName();
 
-    /// <summary>Removes the stand-in model.</summary>
-    public void Dispose() => File.Delete(modelFile);
+    /// <summary>The data folder of this test, so that tests do not share the PID file of the real install.</summary>
+    private readonly string dataFolder = Directory.CreateTempSubdirectory().FullName;
+
+    /// <summary>The request gate of each supervisor that this test created.</summary>
+    private readonly Dictionary<LlamaServerSupervisor, LocalRequestGate> gates = [];
+
+    /// <summary>Removes the stand-in model and the data folder.</summary>
+    public void Dispose()
+    {
+        File.Delete(modelFile);
+        Directory.Delete(dataFolder, recursive: true);
+    }
 
     /// <summary>The arguments include the settings that protect memory and bind only to loopback.</summary>
     [Fact]
     public void BuildArguments_IncludesRequiredSettings()
     {
-        var arguments = LlamaServerSupervisor.BuildArguments(new LlamaCppOptions { ContextSize = 2048, ExtraArguments = ["--threads", "2"] }, 1234);
+        var arguments = LlamaServerArguments.Build(new LlamaCppOptions { ContextSize = 2048, ExtraArguments = ["--threads", "2"] }, 1234);
 
         Assert.Equal("127.0.0.1", arguments[arguments.ToList().IndexOf("--host") + 1]);
         Assert.Equal("2048", arguments[arguments.ToList().IndexOf("--ctx-size") + 1]);
@@ -43,7 +54,7 @@ public sealed class LlamaServerSupervisorTests : IDisposable
     [Fact]
     public void BuildArguments_ExtraContextSize_ReplacesSetting()
     {
-        var arguments = LlamaServerSupervisor.BuildArguments(new LlamaCppOptions { ContextSize = 2048, ExtraArguments = ["-c", "4096"] }, 1234);
+        var arguments = LlamaServerArguments.Build(new LlamaCppOptions { ContextSize = 2048, ExtraArguments = ["-c", "4096"] }, 1234);
 
         Assert.DoesNotContain("--ctx-size", arguments);
         Assert.DoesNotContain("2048", arguments);
@@ -55,7 +66,7 @@ public sealed class LlamaServerSupervisorTests : IDisposable
     [Fact]
     public void BuildArguments_ExtraGpuLayersAndParallel_ReplaceSettings()
     {
-        var arguments = LlamaServerSupervisor.BuildArguments(new LlamaCppOptions { ExtraArguments = ["--n_gpu_layers", "0", "-np", "2"] }, 1234);
+        var arguments = LlamaServerArguments.Build(new LlamaCppOptions { ExtraArguments = ["--n_gpu_layers", "0", "-np", "2"] }, 1234);
 
         Assert.DoesNotContain("--gpu-layers", arguments);
         Assert.DoesNotContain("--parallel", arguments);
@@ -67,7 +78,7 @@ public sealed class LlamaServerSupervisorTests : IDisposable
     [Fact]
     public void BuildArguments_ValueLooksLikeFlag_KeepsSetting()
     {
-        var arguments = LlamaServerSupervisor.BuildArguments(new LlamaCppOptions { ContextSize = 2048, ExtraArguments = ["--threads", "-c"] }, 1234);
+        var arguments = LlamaServerArguments.Build(new LlamaCppOptions { ContextSize = 2048, ExtraArguments = ["--threads", "-c"] }, 1234);
 
         Assert.Equal("2048", arguments[arguments.ToList().IndexOf("--ctx-size") + 1]);
     }
@@ -108,29 +119,35 @@ public sealed class LlamaServerSupervisorTests : IDisposable
         Assert.Empty(none);
     }
 
-    /// <summary>A llama.cpp config file stops the engine at startup, because llama-server would read it.</summary>
+    /// <summary>A llama.cpp config file makes the local model fail, because llama-server would read it. The engine itself still starts, so cloud providers continue to work.</summary>
     /// <returns>A task for the test.</returns>
     [Fact]
-    public async Task Start_ConfigFileExists_Throws()
+    public async Task Start_ConfigFileExists_FailsLocalModelOnly()
     {
         var variable = OperatingSystem.IsWindows() ? "APPDATA" : "XDG_CONFIG_HOME";
         var previous = Environment.GetEnvironmentVariable(variable);
         var folder = Directory.CreateTempSubdirectory().FullName;
+        var (supervisor, provider, _) = Create();
         try
         {
             var configFile = Path.Combine(folder, "llama.cpp", "config.ini");
             Directory.CreateDirectory(Path.GetDirectoryName(configFile)!);
             await File.WriteAllTextAsync(configFile, "log-file = x.log", TestContext.Current.CancellationToken);
             Environment.SetEnvironmentVariable(variable, folder);
-            var (supervisor, _, _) = Create();
 
-            var failure = await Assert.ThrowsAsync<InvalidOperationException>(() => supervisor.StartAsync(TestContext.Current.CancellationToken));
+            await supervisor.StartAsync(TestContext.Current.CancellationToken);
+            await WaitForAsync(() => supervisor.State == LlamaServerState.Failed);
+            var result = await provider.CompleteAsync(TestRequests.Minimal with { Model = "test-model" }, TestContext.Current.CancellationToken);
 
             // A system-wide file on this machine is found first, so the test checks only the file name.
-            Assert.Contains("config.ini", failure.Message, StringComparison.Ordinal);
+            Assert.Contains("config.ini", supervisor.Snapshot.Failure!.Detail, StringComparison.Ordinal);
+            Assert.Equal(ErrorKind.Upstream, result.Error!.Kind);
+            Assert.Contains("config file", result.Error.Message, StringComparison.Ordinal);
+            Assert.DoesNotContain(folder, result.Error.Message, StringComparison.Ordinal);
         }
         finally
         {
+            await supervisor.StopAsync(CancellationToken.None);
             Environment.SetEnvironmentVariable(variable, previous);
             Directory.Delete(folder, recursive: true);
         }
@@ -150,9 +167,10 @@ public sealed class LlamaServerSupervisorTests : IDisposable
             var complete = await provider.CompleteAsync(TestRequests.Minimal with { Model = "test-model" }, TestContext.Current.CancellationToken);
             var stream = await provider.StreamAsync(TestRequests.Minimal with { Model = "test-model" }, TestContext.Current.CancellationToken);
             var chunks = await stream.Value!.ToListAsync(TestContext.Current.CancellationToken);
+            Assert.Equal(0, GateOf(supervisor).Active);
 
             Assert.Equal("fake answer", complete.Value!.Content);
-            Assert.Equal("fake answer", string.Concat(chunks.Select(chunk => chunk.Content)));
+            Assert.Equal("piece0 piece1 ", string.Concat(chunks.Select(chunk => chunk.Content)));
         }
         finally
         {
@@ -227,8 +245,8 @@ public sealed class LlamaServerSupervisorTests : IDisposable
             await WaitForAsync(() => supervisor.State == LlamaServerState.Failed);
 
             Assert.Null(supervisor.Endpoint);
-            Assert.Contains("fake failure", supervisor.FailureReason, StringComparison.Ordinal);
-            Assert.Contains("exit code 3", supervisor.FailureReason, StringComparison.Ordinal);
+            Assert.Contains("fake failure", supervisor.Snapshot.Failure!.Detail, StringComparison.Ordinal);
+            Assert.Contains("exit code 3", supervisor.Snapshot.Failure.Detail, StringComparison.Ordinal);
 
             // A retry would start the server again after 1 second, so wait longer than that.
             await Task.Delay(TimeSpan.FromSeconds(2), TestContext.Current.CancellationToken);
@@ -257,8 +275,10 @@ public sealed class LlamaServerSupervisorTests : IDisposable
 
             var result = await provider.CompleteAsync(TestRequests.Minimal with { Model = "test-model" }, TestContext.Current.CancellationToken);
 
+            // The caller gets the exit code. The server output can hold file paths, so only the engine log gets it.
             Assert.Equal(ErrorKind.Upstream, result.Error!.Kind);
-            Assert.Contains("fake failure", result.Error.Message, StringComparison.Ordinal);
+            Assert.Contains("exit code 3", result.Error.Message, StringComparison.Ordinal);
+            Assert.DoesNotContain("fake failure", result.Error.Message, StringComparison.Ordinal);
             Assert.Null(result.Error.RetryAfter);
         }
         finally
@@ -279,7 +299,8 @@ public sealed class LlamaServerSupervisorTests : IDisposable
         {
             await WaitForAsync(() => supervisor.State == LlamaServerState.Failed);
 
-            Assert.Contains("stopped 3 times", supervisor.FailureReason, StringComparison.Ordinal);
+            Assert.Contains("stopped 3 times", supervisor.Snapshot.Failure!.PublicMessage, StringComparison.Ordinal);
+            Assert.DoesNotContain("correct the settings", supervisor.Snapshot.Failure.PublicMessage, StringComparison.OrdinalIgnoreCase);
         }
         finally
         {
@@ -328,9 +349,8 @@ public sealed class LlamaServerSupervisorTests : IDisposable
     {
         var program = LlamaServerPaths.ServerProgram(Options());
         using var leftover = Process.Start(new ProcessStartInfo(program, ["--port", "0"]) { RedirectStandardOutput = true })!;
-        var pidFile = LlamaServerPidFile.PidFilePath(program);
-        Directory.CreateDirectory(Path.GetDirectoryName(pidFile)!);
-        await File.WriteAllTextAsync(pidFile, LlamaServerPidFile.FormatPidRecord(leftover), TestContext.Current.CancellationToken);
+        var pidFile = new EngineDataFolder(dataFolder).File(LlamaServerPidFile.FileName);
+        await File.WriteAllTextAsync(pidFile, FormatPidRecord(leftover), TestContext.Current.CancellationToken);
         await Task.Delay(500, TestContext.Current.CancellationToken);
         Assert.False(leftover.HasExited, "The stand-in must be running, or this test proves nothing.");
 
@@ -356,10 +376,9 @@ public sealed class LlamaServerSupervisorTests : IDisposable
     public async Task Start_RecordedIdBelongsToOtherProgram_LeavesItRunning()
     {
         var program = LlamaServerPaths.ServerProgram(Options());
-        var pidFile = LlamaServerPidFile.PidFilePath(program);
-        Directory.CreateDirectory(Path.GetDirectoryName(pidFile)!);
+        var pidFile = new EngineDataFolder(dataFolder).File(LlamaServerPidFile.FileName);
         using var self = Process.GetCurrentProcess();
-        await File.WriteAllTextAsync(pidFile, LlamaServerPidFile.FormatPidRecord(self), TestContext.Current.CancellationToken);
+        await File.WriteAllTextAsync(pidFile, FormatPidRecord(self), TestContext.Current.CancellationToken);
 
         var (supervisor, _, _) = Create();
         await supervisor.StartAsync(TestContext.Current.CancellationToken);
@@ -381,8 +400,7 @@ public sealed class LlamaServerSupervisorTests : IDisposable
     {
         var program = LlamaServerPaths.ServerProgram(Options());
         using var unrelated = Process.Start(new ProcessStartInfo(program, ["--port", "0"]) { RedirectStandardOutput = true })!;
-        var pidFile = LlamaServerPidFile.PidFilePath(program);
-        Directory.CreateDirectory(Path.GetDirectoryName(pidFile)!);
+        var pidFile = new EngineDataFolder(dataFolder).File(LlamaServerPidFile.FileName);
         var oldStart = unrelated.StartTime.ToUniversalTime().AddHours(-1).Ticks;
         await File.WriteAllTextAsync(pidFile, $"{unrelated.Id} {oldStart}", TestContext.Current.CancellationToken);
 
@@ -483,7 +501,7 @@ public sealed class LlamaServerSupervisorTests : IDisposable
         var options = Options();
         var (supervisor, _) = Create(options);
         var http = new StubHttpHandler(System.Net.HttpStatusCode.OK, """{"choices":[{"message":{"content":"Hi"},"finish_reason":"stop"}]}""");
-        var provider = new LocalChatProvider(supervisor, new OpenAiClient("local", http, "test", TimeProvider.System, NullLogger.Instance), Microsoft.Extensions.Options.Options.Create(options));
+        var provider = new LocalChatProvider(supervisor, GateOf(supervisor), new OpenAiClient(TestTransports.Create(http, name: "local", kind: ProviderKind.Local)), Microsoft.Extensions.Options.Options.Create(options));
         await supervisor.StartAsync(TestContext.Current.CancellationToken);
         try
         {
@@ -518,9 +536,125 @@ public sealed class LlamaServerSupervisorTests : IDisposable
 
         var result = await provider.CompleteAsync(TestRequests.Minimal with { Model = "test-model" }, TestContext.Current.CancellationToken);
 
-        Assert.Equal(ErrorKind.Unavailable, result.Error!.Kind);
+        Assert.Equal(ErrorKind.Upstream, result.Error!.Kind);
         Assert.Contains("not installed", result.Error.Message, StringComparison.Ordinal);
     }
+
+    /// <summary>Many requests at once reach llama-server one per slot. The others wait in the engine and then succeed.</summary>
+    /// <returns>A task for the test.</returns>
+    [Fact]
+    public async Task Load_ManyRequests_OnePerSlot()
+    {
+        var record = Path.GetTempFileName();
+        var (supervisor, provider) = Create(Tuned(queueLimit: 10, "--complete-delay-ms", "200", "--record-concurrency-to", record));
+        await supervisor.StartAsync(TestContext.Current.CancellationToken);
+        try
+        {
+            await WaitForAsync(() => supervisor.State == LlamaServerState.Ready);
+
+            var results = await Task.WhenAll(Enumerable.Range(0, 5).Select(_ =>
+                provider.CompleteAsync(TestRequests.Minimal with { Model = "test-model" }, TestContext.Current.CancellationToken)));
+
+            Assert.All(results, result => Assert.True(result.IsSuccess));
+            Assert.Equal("1", await File.ReadAllTextAsync(record, TestContext.Current.CancellationToken));
+        }
+        finally
+        {
+            await supervisor.StopAsync(CancellationToken.None);
+            File.Delete(record);
+        }
+    }
+
+    /// <summary>A request that finds the queue full gets 503 at once, and the requests in the queue still succeed.</summary>
+    /// <returns>A task for the test.</returns>
+    [Fact]
+    public async Task Load_QueueFull_RefusesExtraRequests()
+    {
+        var (supervisor, provider) = Create(Tuned(queueLimit: 1, "--complete-delay-ms", "500"));
+        await supervisor.StartAsync(TestContext.Current.CancellationToken);
+        try
+        {
+            await WaitForAsync(() => supervisor.State == LlamaServerState.Ready);
+
+            var results = await Task.WhenAll(Enumerable.Range(0, 4).Select(_ =>
+                provider.CompleteAsync(TestRequests.Minimal with { Model = "test-model" }, TestContext.Current.CancellationToken)));
+
+            Assert.Equal(2, results.Count(result => result.IsSuccess));
+            Assert.Equal(2, results.Count(result => result.Error?.Kind == ErrorKind.Overloaded));
+        }
+        finally
+        {
+            await supervisor.StopAsync(CancellationToken.None);
+        }
+    }
+
+    /// <summary>A busy server that fails its health checks is not stopped while it sends data. New requests wait until it answers again.</summary>
+    /// <returns>A task for the test.</returns>
+    [Fact]
+    public async Task Load_BusyServerFailsHealth_IsNotStopped()
+    {
+        var (supervisor, provider) = Create(Tuned(queueLimit: 4, "--health-fails-while-busy", "--stream-chunks", "16", "--chunk-delay-ms", "300"));
+        await supervisor.StartAsync(TestContext.Current.CancellationToken);
+        try
+        {
+            await WaitForAsync(() => supervisor.State == LlamaServerState.Ready);
+            var first = supervisor.Endpoint;
+            var stream = await provider.StreamAsync(TestRequests.Minimal with { Model = "test-model" }, TestContext.Current.CancellationToken);
+            var reading = stream.Value!.ToListAsync(TestContext.Current.CancellationToken).AsTask();
+
+            await WaitForAsync(() => supervisor.State == LlamaServerState.Unresponsive);
+            var held = await provider.CompleteAsync(TestRequests.Minimal with { Model = "test-model" }, TestContext.Current.CancellationToken);
+            var chunks = await reading;
+
+            Assert.Equal(ErrorKind.Unavailable, held.Error?.Kind);
+            Assert.Equal(16, chunks.Count);
+            await WaitForAsync(() => supervisor.State == LlamaServerState.Ready);
+            Assert.Equal(first, supervisor.Endpoint);
+        }
+        finally
+        {
+            await supervisor.StopAsync(CancellationToken.None);
+        }
+    }
+
+    /// <summary>A busy server that fails its health checks and sends no data for the unresponsive time is replaced. The stuck request fails.</summary>
+    /// <returns>A task for the test.</returns>
+    [Fact]
+    public async Task Load_BusyServerStalls_IsReplaced()
+    {
+        var (supervisor, provider) = Create(Tuned(queueLimit: 4, "--health-fails-while-busy", "--stream-chunks", "4", "--stall-stream-after-chunks", "1"));
+        await supervisor.StartAsync(TestContext.Current.CancellationToken);
+        try
+        {
+            await WaitForAsync(() => supervisor.State == LlamaServerState.Ready);
+            var first = supervisor.Endpoint;
+            var stream = await provider.StreamAsync(TestRequests.Minimal with { Model = "test-model" }, TestContext.Current.CancellationToken);
+
+            await Assert.ThrowsAsync<XatLlmEngine.Application.Abstractions.ChatStreamException>(async () => await stream.Value!.ToListAsync(TestContext.Current.CancellationToken));
+
+            await WaitForAsync(() => supervisor.Endpoint is { } current && !Equals(current, first));
+            Assert.Equal(0, GateOf(supervisor).Active);
+        }
+        finally
+        {
+            await supervisor.StopAsync(CancellationToken.None);
+        }
+    }
+
+    /// <summary>Builds settings with short times for the load tests. The supervisor gets them directly, so the ranges of the settings do not apply.</summary>
+    /// <param name="queueLimit">The number of requests that can wait.</param>
+    /// <param name="extraArguments">Arguments that select the stand-in's behaviour.</param>
+    /// <returns>The settings.</returns>
+    private LlamaCppOptions Tuned(int queueLimit, params string[] extraArguments) => new()
+    {
+        ModelName = "test-model",
+        ModelPath = modelFile,
+        ServerPath = Options().ServerPath,
+        HealthCheckIntervalSeconds = 1,
+        UnresponsiveTimeoutSeconds = 2,
+        MaxQueuedRequests = queueLimit,
+        ExtraArguments = extraArguments,
+    };
 
     /// <summary>Waits for a condition on a running process.</summary>
     /// <param name="condition">The condition.</param>
@@ -559,14 +693,31 @@ public sealed class LlamaServerSupervisorTests : IDisposable
     /// <summary>Creates the supervisor and local provider.</summary>
     /// <param name="options">The settings.</param>
     /// <returns>The objects under test.</returns>
-    private static (LlamaServerSupervisor Supervisor, LocalChatProvider Provider) Create(LlamaCppOptions options)
+    private (LlamaServerSupervisor Supervisor, LocalChatProvider Provider) Create(LlamaCppOptions options)
     {
         var services = new ServiceCollection();
         services.AddHttpClient(DependencyInjection.LocalHttpClientName, client => client.Timeout = Timeout.InfiniteTimeSpan);
         var factory = services.BuildServiceProvider().GetRequiredService<IHttpClientFactory>();
         var wrapped = Microsoft.Extensions.Options.Options.Create(options);
-        var supervisor = new LlamaServerSupervisor(wrapped, factory, TimeProvider.System, NullLogger<LlamaServerSupervisor>.Instance);
-        var client = new OpenAiClient("local", factory, DependencyInjection.LocalHttpClientName, TimeProvider.System, NullLogger.Instance);
-        return (supervisor, new LocalChatProvider(supervisor, client, wrapped));
+        var requestGate = new LocalRequestGate(options.EffectiveParallel, options.MaxQueuedRequests, TimeProvider.System);
+        var supervisor = new LlamaServerSupervisor(wrapped, factory, requestGate, new EngineDataFolder(dataFolder), TimeProvider.System, NullLogger<LlamaServerSupervisor>.Instance);
+        gates[supervisor] = requestGate;
+        var client = new OpenAiClient(new ProviderTransport(
+            new TransportSettings("local", ProviderKind.Local, DependencyInjection.LocalHttpClientName, RequestTimeout: null, ReadIdleTimeout: null),
+            factory,
+            TimeProvider.System,
+            NullLogger.Instance));
+        return (supervisor, new LocalChatProvider(supervisor, requestGate, client, wrapped));
     }
+
+    /// <summary>Gets the request gate of a supervisor.</summary>
+    /// <param name="supervisor">The supervisor.</param>
+    /// <returns>The gate.</returns>
+    private LocalRequestGate GateOf(LlamaServerSupervisor supervisor) => gates[supervisor];
+
+    /// <summary>Builds the text of a PID file for a process.</summary>
+    /// <param name="process">The process.</param>
+    /// <returns>The text.</returns>
+    private static string FormatPidRecord(Process process) =>
+        string.Create(System.Globalization.CultureInfo.InvariantCulture, $"{process.Id} {process.StartTime.ToUniversalTime().Ticks}");
 }

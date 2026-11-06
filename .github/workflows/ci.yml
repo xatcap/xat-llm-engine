@@ -21,5 +21,18 @@ jobs:
       - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
         with:
           global-json-file: global.json
-      - run: dotnet build XatLlmEngine.slnx --configuration Release
+      # Locked mode fails when a packages.lock.json does not match the project files.
+      - run: dotnet restore XatLlmEngine.slnx --locked-mode
+      - run: dotnet build XatLlmEngine.slnx --configuration Release --no-restore
       - run: dotnet test --solution XatLlmEngine.slnx --configuration Release --no-build
+
+  release-files:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.13'
+      - run: python build/release.py check-changelog
+      - run: python build/release.py check-notices

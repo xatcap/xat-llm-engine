@@ -15,6 +15,12 @@ public enum ErrorKind
     /// <summary>The provider cannot serve requests right now, for example while a local model loads.</summary>
     Unavailable,
 
-    /// <summary>A provider failed or returned something the engine could not use.</summary>
+    /// <summary>A provider failed or returned something the engine could not use. A retry does not help.</summary>
     Upstream,
+
+    /// <summary>The engine's own queue for a provider is full. The caller can try again after a short wait.</summary>
+    Overloaded,
+
+    /// <summary>The provider has used its token budget. The caller can try again after the wait in the error.</summary>
+    BudgetExceeded,
 }

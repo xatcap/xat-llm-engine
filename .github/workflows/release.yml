@@ -20,7 +20,51 @@ env:
   VERSION: ${{ github.event_name == 'push' && github.ref_name || inputs.version }}
 
 jobs:
+  # A release builds only from a commit that passes every test on every platform.
+  test:
+    strategy:
+      fail-fast: true
+      matrix:
+        os: [ubuntu-24.04, macos-15, windows-2025]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
+        with:
+          global-json-file: global.json
+      - run: dotnet restore XatLlmEngine.slnx --locked-mode
+      - run: dotnet build XatLlmEngine.slnx --configuration Release --no-restore
+      - run: dotnet test --solution XatLlmEngine.slnx --configuration Release --no-build
+
+  changelog:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.13'
+      - name: Check that CHANGELOG.md has a section for this version
+        # A dry run has no CHANGELOG section, so it uses the Unreleased section.
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            python build/release.py check-changelog --version "${VERSION#v}" --notes release-notes.md
+          else
+            python build/release.py check-changelog --notes release-notes.md
+          fi
+      - name: Check that every shipped package has its license texts
+        run: python build/release.py check-notices
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-notes
+          path: release-notes.md
+          retention-days: 7
+          if-no-files-found: error
+
   package:
+    needs: [test, changelog]
     strategy:
       fail-fast: false
       matrix:
@@ -91,6 +135,10 @@ jobs:
           pattern: package-*
           merge-multiple: true
           path: release
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-notes
+          path: notes
       - name: Restore the model from the cache
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -120,7 +168,7 @@ jobs:
             flags+=(--target "$GITHUB_SHA" --title "Dry run ${VERSION}")
           fi
           # The release stays a draft until the upload of every file is complete, so nobody can download a partial release.
-          gh release create "$label" --draft --generate-notes "${flags[@]}"
+          gh release create "$label" --draft --notes-file notes/release-notes.md "${flags[@]}"
           gh release upload "$label" release/*
           if [ "$IS_TAG" = "true" ]; then
             gh release edit "$label" --draft=false

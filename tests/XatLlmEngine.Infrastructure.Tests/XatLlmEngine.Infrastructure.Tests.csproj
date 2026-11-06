@@ -6,5 +6,10 @@
     <ProjectReference Include="..\..\src\XatLlmEngine.Infrastructure\XatLlmEngine.Infrastructure.csproj" />
     <ProjectReference Include="..\XatLlmEngine.FakeLlamaServer\XatLlmEngine.FakeLlamaServer.csproj" />
     <PackageReference Include="Microsoft.Extensions.Diagnostics.Testing" />
+    <PackageReference Include="Microsoft.Extensions.TimeProvider.Testing" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- A test checks that the pinned llama.cpp build is the build that the engine's rules were checked against. -->
+    <None Include="..\..\build\llama-cpp.lock.json" Link="llama-cpp.lock.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

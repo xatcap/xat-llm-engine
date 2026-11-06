@@ -12,7 +12,7 @@ internal static class ModelsEndpoint
     public static IResult Handle(ListModelsHandler handler)
     {
         var models = handler.Handle()
-            .Select(id => new ModelResponse(id, "model", id[..id.IndexOf('/', StringComparison.Ordinal)]))
+            .Select(entry => new ModelResponse(entry.Id, "model", entry.Provider))
             .ToList();
         return Results.Json(new ModelListResponse("list", models), HostJson.Default.ModelListResponse);
     }

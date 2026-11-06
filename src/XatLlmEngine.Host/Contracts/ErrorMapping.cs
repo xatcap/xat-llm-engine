@@ -24,7 +24,9 @@ internal static class ErrorMapping
         ErrorKind.NotFound => StatusCodes.Status404NotFound,
         ErrorKind.RateLimited => StatusCodes.Status429TooManyRequests,
         ErrorKind.Unavailable => StatusCodes.Status503ServiceUnavailable,
-        _ => StatusCodes.Status502BadGateway,
+        ErrorKind.Upstream => StatusCodes.Status502BadGateway,
+        ErrorKind.Overloaded => StatusCodes.Status503ServiceUnavailable,
+        ErrorKind.BudgetExceeded => StatusCodes.Status429TooManyRequests,
     };
 
     /// <summary>Builds the response body for an error.</summary>
@@ -36,7 +38,9 @@ internal static class ErrorMapping
         ErrorKind.NotFound => "not_found_error",
         ErrorKind.RateLimited => "rate_limit_error",
         ErrorKind.Unavailable => "service_unavailable_error",
-        _ => "upstream_error",
+        ErrorKind.Upstream => "upstream_error",
+        ErrorKind.Overloaded => "overloaded_error",
+        ErrorKind.BudgetExceeded => "budget_exceeded_error",
     }));
 
     /// <summary>Builds the complete HTTP result for an error, and asks callers to wait before retrying when the failure is temporary. The wait is the provider's own, when the provider sent one. The wait is always at least 1 second, so that callers do not retry immediately.</summary>
@@ -45,7 +49,7 @@ internal static class ErrorMapping
     /// <returns>The result to return from the endpoint.</returns>
     public static IResult ToResult(HttpContext context, EngineError error)
     {
-        if (error.Kind is ErrorKind.Unavailable or ErrorKind.RateLimited)
+        if (error.Kind is ErrorKind.Unavailable or ErrorKind.RateLimited or ErrorKind.Overloaded or ErrorKind.BudgetExceeded)
         {
             context.Response.Headers.RetryAfter = error.RetryAfter is { } delay
                 ? Math.Max(1, (long)Math.Ceiling(delay.TotalSeconds)).ToString(CultureInfo.InvariantCulture)
@@ -60,10 +64,16 @@ internal static class ErrorMapping
     public static IResult UnsupportedMediaType() =>
         Json("The Content-Type must be application/json.", InvalidRequestType, StatusCodes.Status415UnsupportedMediaType);
 
+    /// <summary>Builds the result for a request body that is larger than the limit.</summary>
+    /// <param name="limit">The limit, in bytes.</param>
+    /// <returns>A 413 result.</returns>
+    public static IResult RequestTooLarge(long limit) =>
+        Json($"The request body is larger than {limit} bytes. Send a smaller request, or increase Api:MaxRequestBodyBytes.", InvalidRequestType, StatusCodes.Status413PayloadTooLarge);
+
     /// <summary>Builds the result for an unexpected failure. It never holds the failure's details.</summary>
     /// <returns>A 500 result.</returns>
     public static IResult Unexpected() =>
-        Json("The engine failed unexpectedly.", InternalType, StatusCodes.Status500InternalServerError);
+        Json("The engine failed unexpectedly. Report the problem with the X-Request-Id header of this response. The engine log has the cause.", InternalType, StatusCodes.Status500InternalServerError);
 
     /// <summary>Writes the body of a response that ASP.NET ended with only a status, such as an unknown route.</summary>
     /// <param name="context">The current request.</param>

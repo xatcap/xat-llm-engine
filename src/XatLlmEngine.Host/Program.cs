@@ -1,10 +1,10 @@
 using Microsoft.AspNetCore.Diagnostics;
-using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using System.Text.Json.Nodes;
 using XatLlmEngine.Application;
-using XatLlmEngine.Application.Abstractions;
+using XatLlmEngine.Application.Features.Providers;
 using XatLlmEngine.Host;
 using XatLlmEngine.Host.Contracts;
+using XatLlmEngine.Host.Diagnostics;
 using XatLlmEngine.Host.Endpoints;
 using XatLlmEngine.Host.Security;
 using XatLlmEngine.Infrastructure;
@@ -18,7 +18,7 @@ var builder = WebApplication.CreateBuilder(new WebApplicationOptions
 
 ListenAddressPolicy.EnsureAllowed(builder.Configuration);
 
-builder.Services.AddHealthChecks();
+builder.Services.AddOptions<ApiOptions>().Bind(builder.Configuration.GetSection(ApiOptions.SectionName)).ValidateDataAnnotations().ValidateOnStart();
 builder.Services.ConfigureHttpJsonOptions(options =>
 {
     // The API documentation reads its property names from these settings, so it must match what the API really sends.
@@ -32,6 +32,8 @@ builder.Services.AddApplication().AddInfrastructure(builder.Configuration);
 
 var app = builder.Build();
 
+// This middleware comes first, so that every log line of a request, also of an unexpected failure, holds its ID.
+app.UseMiddleware<RequestIdMiddleware>();
 app.UseExceptionHandler(errorApp => errorApp.Run(async context =>
 {
     var failure = context.Features.Get<IExceptionHandlerFeature>()?.Error;
@@ -51,13 +53,14 @@ api.MapPost("/chat/completions", ChatCompletionsEndpoint.HandleAsync)
     .Produces<ChatCompletionResponse>()
     .Produces<ErrorResponse>(StatusCodes.Status400BadRequest)
     .Produces<ErrorResponse>(StatusCodes.Status404NotFound)
+    .Produces<ErrorResponse>(StatusCodes.Status413PayloadTooLarge)
     .Produces<ErrorResponse>(StatusCodes.Status415UnsupportedMediaType)
     .Produces<ErrorResponse>(StatusCodes.Status429TooManyRequests)
     .Produces<ErrorResponse>(StatusCodes.Status502BadGateway)
     .Produces<ErrorResponse>(StatusCodes.Status503ServiceUnavailable);
 api.MapGet("/models", ModelsEndpoint.Handle)
     .Produces<ModelListResponse>();
-app.MapHealthChecks("/health", new HealthCheckOptions { ResponseWriter = HealthResponseWriter.WriteAsync });
+HealthEndpoints.Map(app);
 
 // The API documentation is for debugging only. A release package runs as Production, so it does not expose these routes.
 if (app.Environment.IsDevelopment())
@@ -67,7 +70,8 @@ if (app.Environment.IsDevelopment())
 }
 
 var startupLogger = app.Services.GetRequiredService<ILogger<Program>>();
-var enabledProviders = string.Join(", ", app.Services.GetServices<IChatProvider>().Select(provider => provider.Name));
+// Building the registry here also stops the engine at startup when two providers have the same name.
+var enabledProviders = string.Join(", ", app.Services.GetRequiredService<ProviderRegistry>().All.Select(provider => provider.Name));
 StartupLog.EnabledProviders(startupLogger, enabledProviders);
 
 await app.RunAsync().ConfigureAwait(false);

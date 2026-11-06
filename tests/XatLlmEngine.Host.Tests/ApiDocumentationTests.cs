@@ -91,8 +91,8 @@ public class ApiDocumentationTests
         using var content = new StringContent(example, System.Text.Encoding.UTF8, "application/json");
         using var response = await client.PostAsync(new Uri("/v1/chat/completions", UriKind.Relative), content, TestContext.Current.CancellationToken);
 
-        // The local model is absent in this test, so 503 shows that the request passed validation and reached the provider.
-        Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
+        // The local model is absent in this test, so 502 shows that the request passed validation and reached the provider.
+        Assert.Equal(HttpStatusCode.BadGateway, response.StatusCode);
     }
 
     /// <summary>Hosts the engine in one environment.</summary>

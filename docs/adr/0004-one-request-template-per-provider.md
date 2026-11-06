@@ -14,7 +14,7 @@ The engine silently removed fields that it did not know. ADR 0002 says that unsu
 
 Each provider lists the request fields it accepts as `RequestFields` in configuration. This list is the provider's request template.
 
-Callers send the native format of the provider they name. The engine forwards each listed field unchanged. It returns a 400 error for any other top-level field. Responses stay in one unified format.
+Callers send the native format of the provider they name. The engine forwards each listed field unchanged, except for the defaults that the README lists under "Request templates". The README is the contract for these defaults. The engine returns a 400 error for any other top-level field. Responses stay in one unified format.
 
 This decision replaces two parts of ADR 0002. The consequence "Existing OpenAI clients work by changing their base URL and model name" now applies only to providers that use the OpenAI format. The part that gives one request format for all providers no longer holds.
 
@@ -22,9 +22,19 @@ This decision replaces two parts of ADR 0002. The consequence "Existing OpenAI c
 
 - A vendor's request change needs only that provider's configuration. Shared code does not change.
 - Callers must know the request format of each provider they use.
-- The engine does not check the values of forwarded fields. The vendor's own error comes back for a bad value.
+- The engine does not check the values of forwarded fields, except the token field. The vendor's own error comes back for a bad value.
 - Response format changes stay in each provider's adapter, so callers still see one format.
 - OpenAI-format providers still share `OpenAiClient`. If one of them drifts from the OpenAI format, it gets its own adapter.
+
+## Amendment (2026-11-06)
+
+The engine adds these values to the request it sends. It never changes a value that the caller sent:
+
+- The local model gets `LocalModel:DefaultTemperature` when the request has no `temperature`.
+- A provider with `MaxTokensLimit` gets the limit when the request has no token field. See [ADR 0011](0011-cost-control.md).
+- An OpenAI-format provider whose template lists `stream_options` gets `stream_options.include_usage` in a stream.
+
+The engine also checks the token field against the limit, and refuses tool content inside `messages` (ADR 0002).
 
 ## Alternatives considered
 

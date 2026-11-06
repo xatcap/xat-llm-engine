@@ -1,2 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <!-- 'dotnet publish' of the Host gives its runtime to this project too, so the lock file must pin the packages of each release platform. -->
+    <RuntimeIdentifiers>osx-arm64;linux-x64;win-x64</RuntimeIdentifiers>
+  </PropertyGroup>
 </Project>

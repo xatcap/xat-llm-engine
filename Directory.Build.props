@@ -12,6 +12,8 @@
     <ContinuousIntegrationBuild Condition="'$(CI)' == 'true'">true</ContinuousIntegrationBuild>
     <NuGetAudit>true</NuGetAudit>
     <NuGetAuditMode>all</NuGetAuditMode>
+    <!-- Each project commits a packages.lock.json. CI and the release restore in locked mode, so every package, transitive packages included, is pinned by its content hash. -->
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
     <Version Condition="'$(Version)' == ''">0.1.0</Version>
   </PropertyGroup>
   <ItemGroup>

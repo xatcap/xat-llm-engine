@@ -113,8 +113,8 @@ public class ApiTests
         using var local = await PostAsync(engine, """{"model":"local/ministral-3-3b","top_k":5,"messages":[]}""");
         using var fake = await PostAsync(engine, """{"model":"fake/model-a","top_k":5,"messages":[]}""");
 
-        // The local model is absent in this test, so 503 shows that the request passed the template check.
-        Assert.Equal(HttpStatusCode.ServiceUnavailable, local.StatusCode);
+        // The local model is absent in this test, so 502 shows that the request passed the template check.
+        Assert.Equal(HttpStatusCode.BadGateway, local.StatusCode);
         Assert.Equal(HttpStatusCode.BadRequest, fake.StatusCode);
     }
 
@@ -206,17 +206,18 @@ public class ApiTests
         Assert.Equal("internal_error", body.RootElement.GetProperty("error").GetProperty("type").GetString());
     }
 
-    /// <summary>A local request without an installed model returns 503, and the engine itself keeps working.</summary>
+    /// <summary>A local request without an installed model returns 502 with no wait, because a retry does not help. The engine itself keeps working.</summary>
     /// <returns>A task for the test.</returns>
     [Fact]
-    public async Task Chat_LocalModelMissing_Returns503()
+    public async Task Chat_LocalModelMissing_Returns502()
     {
         await using var engine = new EngineFactory();
 
         using var response = await PostAsync(engine, """{"model":"local/ministral-3-3b","messages":[{"role":"user","content":"Hi"}]}""");
 
-        Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
-        Assert.NotNull(response.Headers.RetryAfter);
+        Assert.Equal(HttpStatusCode.BadGateway, response.StatusCode);
+        Assert.Null(response.Headers.RetryAfter);
+        await AssertErrorFormatAsync(response, "upstream_error");
     }
 
     /// <summary>A stream follows the OpenAI format: a role piece, text, a finish piece, a usage piece, then the end marker.</summary>
@@ -429,6 +430,61 @@ public class ApiTests
         Assert.Contains("missing", message, StringComparison.Ordinal);
     }
 
+    /// <summary>The health body lists each configured provider, with its state, and the engine version.</summary>
+    /// <returns>A task for the test.</returns>
+    [Fact]
+    public async Task Health_ListsEveryProvider()
+    {
+        await using var engine = new EngineFactory();
+        using var client = engine.CreateClient();
+
+        using var response = await client.GetAsync(new Uri("/health", UriKind.Relative), TestContext.Current.CancellationToken);
+
+        using var body = await ReadJsonAsync(response);
+        var providers = body.RootElement.GetProperty("providers").EnumerateArray()
+            .ToDictionary(entry => entry.GetProperty("name").GetString()!, entry => entry.GetProperty("state").GetString());
+        Assert.Equal("ready", providers["fake"]);
+        Assert.Equal("disabled", providers["openai"]);
+        Assert.True(providers.ContainsKey("local"));
+        Assert.False(string.IsNullOrEmpty(body.RootElement.GetProperty("version").GetString()));
+    }
+
+    /// <summary>The live route answers while the process runs, whatever the providers do.</summary>
+    /// <returns>A task for the test.</returns>
+    [Fact]
+    public async Task HealthLive_Returns200()
+    {
+        await using var engine = new EngineFactory();
+        using var client = engine.CreateClient();
+
+        using var response = await client.GetAsync(new Uri("/health/live", UriKind.Relative), TestContext.Current.CancellationToken);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using var body = await ReadJsonAsync(response);
+        Assert.Equal("alive", body.RootElement.GetProperty("status").GetString());
+    }
+
+    /// <summary>The ready route gives 200 for a provider that can take requests, and 503 for one that cannot.</summary>
+    /// <param name="query">The query string.</param>
+    /// <param name="expected">The expected status.</param>
+    /// <returns>A task for the test.</returns>
+    [Theory]
+    [InlineData("", HttpStatusCode.OK)]
+    [InlineData("?provider=fake", HttpStatusCode.OK)]
+    [InlineData("?provider=FAKE", HttpStatusCode.OK)]
+    [InlineData("?provider=local", HttpStatusCode.ServiceUnavailable)]
+    [InlineData("?provider=openai", HttpStatusCode.ServiceUnavailable)]
+    [InlineData("?provider=unknown", HttpStatusCode.ServiceUnavailable)]
+    public async Task HealthReady_DependsOnProvider(string query, HttpStatusCode expected)
+    {
+        await using var engine = new EngineFactory();
+        using var client = engine.CreateClient();
+
+        using var response = await client.GetAsync(new Uri($"/health/ready{query}", UriKind.Relative), TestContext.Current.CancellationToken);
+
+        Assert.Equal(expected, response.StatusCode);
+    }
+
     /// <summary>The engine refuses a request with a host name from outside the machine. This blocks DNS rebinding attacks from web pages.</summary>
     /// <returns>A task for the test.</returns>
     [Fact]
@@ -442,6 +498,102 @@ public class ApiTests
         using var response = await client.SendAsync(request, TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    /// <summary>A body larger than the limit gets 413 in the API's error format, and the provider is not called.</summary>
+    /// <param name="chunked">Tells whether the body has no Content-Length, so that the engine must count while it reads.</param>
+    /// <returns>A task for the test.</returns>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Chat_BodyTooLarge_Returns413(bool chunked)
+    {
+        await using var engine = new EngineFactory(new Dictionary<string, string?> { ["Api:MaxRequestBodyBytes"] = "2048" });
+        using var client = engine.CreateClient();
+        var large = "{\"model\":\"fake/model-a\",\"messages\":[{\"role\":\"user\",\"content\":\"" + new string('x', 4096) + "\"}]}";
+        using var content = chunked
+            ? (HttpContent)new StreamContent(new MemoryStream(Encoding.UTF8.GetBytes(large)))
+            : new StringContent(large, Encoding.UTF8);
+        content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/json");
+
+        using var response = await client.PostAsync(new Uri("/v1/chat/completions", UriKind.Relative), content, TestContext.Current.CancellationToken);
+
+        Assert.Equal(HttpStatusCode.RequestEntityTooLarge, response.StatusCode);
+        await AssertErrorFormatAsync(response, "invalid_request_error");
+        Assert.Null(engine.Provider.LastRequest);
+    }
+
+    /// <summary>Tool content inside a message gets 400 through the API, and the provider is not called.</summary>
+    /// <returns>A task for the test.</returns>
+    [Fact]
+    public async Task Chat_ToolMessage_Returns400()
+    {
+        await using var engine = new EngineFactory();
+
+        using var response = await PostAsync(engine, """{"model":"fake/model-a","messages":[{"role":"tool","tool_call_id":"1","content":"42"}]}""");
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        await AssertErrorFormatAsync(response, "invalid_request_error");
+        Assert.Null(engine.Provider.LastRequest);
+    }
+
+    /// <summary>Every response has a request ID, for a success, an error and an unknown route, so that a caller can report a problem.</summary>
+    /// <param name="path">The route.</param>
+    /// <param name="body">The request body, or <see langword="null"/> for a GET request.</param>
+    /// <returns>A task for the test.</returns>
+    [Theory]
+    [InlineData("/v1/chat/completions", ValidBody)]
+    [InlineData("/v1/chat/completions", """{"model":"unknown/x","messages":[]}""")]
+    [InlineData("/no-such-route", null)]
+    public async Task Response_HasRequestId(string path, string? body)
+    {
+        await using var engine = new EngineFactory();
+        using var client = engine.CreateClient();
+        using var content = body is null ? null : new StringContent(body, Encoding.UTF8, "application/json");
+
+        using var response = body is null
+            ? await client.GetAsync(new Uri(path, UriKind.Relative), TestContext.Current.CancellationToken)
+            : await client.PostAsync(new Uri(path, UriKind.Relative), content, TestContext.Current.CancellationToken);
+
+        Assert.True(response.Headers.TryGetValues("X-Request-Id", out var values));
+        Assert.False(string.IsNullOrWhiteSpace(Assert.Single(values)));
+    }
+
+    /// <summary>A provider that has used its budget gets 429 with a wait, also after an engine restart. The health route reports it.</summary>
+    /// <returns>A task for the test.</returns>
+    [Fact]
+    public async Task Chat_BudgetUsedUp_Returns429AfterRestart()
+    {
+        var folder = Directory.CreateTempSubdirectory("xat-engine-test-").FullName;
+        try
+        {
+            await using (var engine = new EngineFactory(dataFolder: folder))
+            {
+                // Each answer of the fake provider uses 5 tokens.
+                engine.Provider.Budget = new TokenBudget(10, TimeSpan.FromHours(24));
+                using var first = await PostAsync(engine, ValidBody);
+                using var second = await PostAsync(engine, ValidBody);
+                using var refused = await PostAsync(engine, ValidBody);
+
+                Assert.Equal(HttpStatusCode.OK, second.StatusCode);
+                Assert.Equal(HttpStatusCode.TooManyRequests, refused.StatusCode);
+                await AssertErrorFormatAsync(refused, "budget_exceeded_error");
+                Assert.True(refused.Headers.RetryAfter!.Delta > TimeSpan.FromHours(23));
+            }
+
+            await using var restarted = new EngineFactory(dataFolder: folder);
+            restarted.Provider.Budget = new TokenBudget(10, TimeSpan.FromHours(24));
+            using var afterRestart = await PostAsync(restarted, ValidBody);
+            using var client = restarted.CreateClient();
+            using var health = await client.GetAsync(new Uri("/health/ready?provider=fake", UriKind.Relative), TestContext.Current.CancellationToken);
+
+            Assert.Equal(HttpStatusCode.TooManyRequests, afterRestart.StatusCode);
+            Assert.Equal(HttpStatusCode.ServiceUnavailable, health.StatusCode);
+        }
+        finally
+        {
+            Directory.Delete(folder, recursive: true);
+        }
     }
 
     /// <summary>Posts a chat request.</summary>

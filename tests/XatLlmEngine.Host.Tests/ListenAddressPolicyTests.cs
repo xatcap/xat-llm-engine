@@ -13,6 +13,13 @@ public class ListenAddressPolicyTests
     [InlineData("urls", "http://127.0.0.1:8420")]
     [InlineData("urls", "http://localhost:8420;http://[::1]:8420")]
     [InlineData("Kestrel:Endpoints:Main:Url", "http://127.0.0.1:8420")]
+    [InlineData("urls", "http://[::1]:8420")]
+    [InlineData("urls", "http://127.0.0.2:8420")]
+    [InlineData("urls", "http://[::ffff:127.0.0.1]:8420")]
+    [InlineData("urls", "http://LOCALHOST:8420")]
+    [InlineData("urls", " http://127.0.0.1:8420 ; http://[::1]:8421 ")]
+    [InlineData("urls", "http://unix:/tmp/xat-engine.sock")]
+    [InlineData("Kestrel:Endpoints:Main:Url", "")]
     public void EnsureAllowed_Loopback_Passes(string key, string value)
     {
         ListenAddressPolicy.EnsureAllowed(Configuration((key, value)));
@@ -31,9 +38,27 @@ public class ListenAddressPolicyTests
     [InlineData("http_ports", "8420")]
     [InlineData("https_ports", "8421")]
     [InlineData("Kestrel:Endpoints:Main:Url", "http://0.0.0.0:8420")]
+    [InlineData("urls", "http://localhost.example.com:8420")]
+    [InlineData("urls", "http://localhost.:8420")]
+    [InlineData("urls", "http://myhost:8420")]
+    [InlineData("urls", "https://[::]:8443")]
+    [InlineData("http_ports", "8420;8421")]
     public void EnsureAllowed_Network_Throws(string key, string value)
     {
         Assert.Throws<InvalidOperationException>(() => ListenAddressPolicy.EnsureAllowed(Configuration((key, value))));
+    }
+
+    /// <summary>Several Kestrel endpoints are all checked. One network address among them stops the engine.</summary>
+    [Fact]
+    public void EnsureAllowed_SeveralEndpointsOneOnNetwork_Throws()
+    {
+        var configuration = Configuration(
+            ("Kestrel:Endpoints:Local:Url", "http://127.0.0.1:8420"),
+            ("Kestrel:Endpoints:Lan:Url", "http://192.168.1.5:8420"));
+
+        var failure = Assert.Throws<InvalidOperationException>(() => ListenAddressPolicy.EnsureAllowed(configuration));
+
+        Assert.Contains("192.168.1.5", failure.Message, StringComparison.Ordinal);
     }
 
     /// <summary>Builds configuration from values.</summary>

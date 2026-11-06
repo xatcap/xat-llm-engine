@@ -1,11 +1,7 @@
-using System.Net.Http.Json;
+using System.Net.Http.Headers;
 using System.Net.ServerSentEvents;
-using System.Runtime.CompilerServices;
-using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
-using Microsoft.Extensions.Logging;
-using Polly.Timeout;
 using XatLlmEngine.Application.Abstractions;
 using XatLlmEngine.Domain;
 
@@ -15,17 +11,8 @@ namespace XatLlmEngine.Infrastructure.Providers.Anthropic;
 /// <remarks>Callers send Anthropic's own request format, and this adapter converts the answer to the engine's unified response.</remarks>
 /// <param name="name">The provider's name.</param>
 /// <param name="options">The provider's settings. These settings must include its base URL and key.</param>
-/// <param name="httpClientFactory">Creates HTTP clients, so that the connection pool works correctly.</param>
-/// <param name="httpClientName">The named client, which carries the provider's resilience settings.</param>
-/// <param name="timeProvider">The clock, for a Retry-After header that holds a date.</param>
-/// <param name="logger">The log for failed responses.</param>
-internal sealed class AnthropicChatProvider(
-    string name,
-    ProviderOptions options,
-    IHttpClientFactory httpClientFactory,
-    string httpClientName,
-    TimeProvider timeProvider,
-    ILogger<AnthropicChatProvider> logger) : IChatProvider
+/// <param name="transport">Sends the requests and translates transport failures.</param>
+internal sealed class AnthropicChatProvider(string name, ProviderOptions options, ProviderTransport transport) : IChatProvider
 {
     /// <summary>The API version that this adapter was built for.</summary>
     private const string ApiVersion = "2023-06-01";
@@ -40,61 +27,24 @@ internal sealed class AnthropicChatProvider(
     public IReadOnlyList<string> RequestFields => options.RequestFields;
 
     /// <inheritdoc/>
-    public async Task<Result<ChatCompletion>> CompleteAsync(ChatRequest request, CancellationToken cancellationToken)
-    {
-        try
-        {
-            using var response = await SendAsync(ToWire(request, stream: false), cancellationToken).ConfigureAwait(false);
-            if (!response.IsSuccessStatusCode)
-            {
-                return Result<ChatCompletion>.Fail(await HttpFailure.FromResponseAsync(name, response, timeProvider.GetUtcNow(), logger, cancellationToken).ConfigureAwait(false));
-            }
-
-            var body = await response.Content
-                .ReadFromJsonAsync(ProviderJson.Default.AnthropicResponse, cancellationToken)
-                .ConfigureAwait(false);
-            if (body?.Content is null)
-            {
-                return Result<ChatCompletion>.Fail(HttpFailure.Malformed(name));
-            }
-
-            var text = string.Concat(body.Content.Where(block => block.Type == "text").Select(block => block.Text));
-            var usage = body.Usage is null ? null : new TokenUsage(body.Usage.InputTokens ?? 0, body.Usage.OutputTokens ?? 0);
-            return Result<ChatCompletion>.Ok(new ChatCompletion(text, ToFinishReason(body.StopReason), usage));
-        }
-        catch (JsonException)
-        {
-            return Result<ChatCompletion>.Fail(HttpFailure.Malformed(name));
-        }
-        catch (Exception exception) when (exception is HttpRequestException or TimeoutRejectedException)
-        {
-            return Result<ChatCompletion>.Fail(HttpFailure.Unreachable(name, exception, logger));
-        }
-    }
+    public int MaxTokensLimit => options.MaxTokensLimit;
 
     /// <inheritdoc/>
-    public async Task<Result<IAsyncEnumerable<ChatChunk>>> StreamAsync(ChatRequest request, CancellationToken cancellationToken)
-    {
-        HttpResponseMessage response;
-        try
-        {
-            response = await SendAsync(ToWire(request, stream: true), cancellationToken).ConfigureAwait(false);
-        }
-        catch (Exception exception) when (exception is HttpRequestException or TimeoutRejectedException)
-        {
-            return Result<IAsyncEnumerable<ChatChunk>>.Fail(HttpFailure.Unreachable(name, exception, logger));
-        }
+    public TokenBudget? Budget => options.TokenBudget > 0 ? new TokenBudget(options.TokenBudget, TimeSpan.FromHours(options.BudgetPeriodHours)) : null;
 
-        if (!response.IsSuccessStatusCode)
-        {
-            using (response)
-            {
-                return Result<IAsyncEnumerable<ChatChunk>>.Fail(await HttpFailure.FromResponseAsync(name, response, timeProvider.GetUtcNow(), logger, cancellationToken).ConfigureAwait(false));
-            }
-        }
+    /// <inheritdoc/>
+    public Task<Result<ChatCompletion>> CompleteAsync(ChatRequest request, CancellationToken cancellationToken) =>
+        transport.CompleteAsync(
+            Operation(),
+            Authenticate,
+            ToWire(request, stream: false),
+            ProviderJson.Default.AnthropicResponse,
+            ToCompletion,
+            cancellationToken);
 
-        return Result<IAsyncEnumerable<ChatChunk>>.Ok(ReadChunksAsync(response, cancellationToken));
-    }
+    /// <inheritdoc/>
+    public Task<Result<IAsyncEnumerable<ChatChunk>>> StreamAsync(ChatRequest request, CancellationToken cancellationToken) =>
+        transport.StreamAsync(Operation(), Authenticate, ToWire(request, stream: true), ReadChunksAsync, cancellationToken);
 
     /// <summary>Converts Anthropic's stop reason to the engine's reason.</summary>
     /// <param name="stopReason">The wire value.</param>
@@ -106,32 +56,42 @@ internal sealed class AnthropicChatProvider(
         _ => FinishReason.Stop,
     };
 
-    /// <summary>Sends the request and returns as soon as response headers arrive, so that streams are not buffered.</summary>
-    /// <param name="body">The request body.</param>
-    /// <param name="cancellationToken">Cancels the request.</param>
-    /// <returns>The response, which the caller must dispose.</returns>
-    private async Task<HttpResponseMessage> SendAsync(JsonObject body, CancellationToken cancellationToken)
-    {
-        using var message = new HttpRequestMessage(HttpMethod.Post, new Uri($"{options.BaseUrl!.ToString().TrimEnd('/')}/v1/messages"))
-        {
-            Content = new StringContent(body.ToJsonString(), Encoding.UTF8, "application/json"),
-        };
-        message.Headers.Add("x-api-key", options.ApiKey);
-        message.Headers.Add("anthropic-version", ApiVersion);
+    /// <summary>Builds the address of the Messages operation.</summary>
+    /// <returns>The address.</returns>
+    private Uri Operation() => new($"{options.BaseUrl!.ToString().TrimEnd('/')}/v1/messages");
 
-        using var client = httpClientFactory.CreateClient(httpClientName);
-        return await client.SendAsync(message, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
+    /// <summary>Adds the key and the API version.</summary>
+    /// <param name="headers">The request headers.</param>
+    private void Authenticate(HttpRequestHeaders headers)
+    {
+        headers.Add("x-api-key", options.ApiKey);
+        headers.Add("anthropic-version", ApiVersion);
     }
 
-    /// <summary>Builds the body to send. The caller's fields pass through unchanged. If the token limit is missing, this method adds it, because the API requires it.</summary>
+    /// <summary>Converts a complete answer.</summary>
+    /// <param name="body">The wire answer.</param>
+    /// <returns>The answer, or a failure when the answer has no content.</returns>
+    private Result<ChatCompletion> ToCompletion(AnthropicResponse? body)
+    {
+        if (body?.Content is null)
+        {
+            return Result<ChatCompletion>.Fail(transport.Malformed());
+        }
+
+        var text = string.Concat(body.Content.Where(block => block.Type == "text").Select(block => block.Text));
+        var usage = body.Usage is null ? null : new TokenUsage(body.Usage.InputTokens ?? 0, body.Usage.OutputTokens ?? 0);
+        return Result<ChatCompletion>.Ok(new ChatCompletion(text, ToFinishReason(body.StopReason), usage));
+    }
+
+    /// <summary>Builds the body to send. The caller's fields pass through unchanged. The Application layer has already added the token limit, which the API requires.</summary>
     /// <param name="request">The routed request.</param>
     /// <param name="stream">Whether to ask for a stream.</param>
     /// <returns>The body.</returns>
-    private JsonObject ToWire(ChatRequest request, bool stream)
+    private static JsonObject ToWire(ChatRequest request, bool stream)
     {
-        var body = request.Body.DeepClone().AsObject();
+        // The request owns its body, so the adapter can change it.
+        var body = request.Body;
         body["model"] = request.Model;
-        body["max_tokens"] ??= options.DefaultMaxTokens;
         if (stream)
         {
             body["stream"] = true;
@@ -144,14 +104,13 @@ internal sealed class AnthropicChatProvider(
         return body;
     }
 
-    /// <summary>Converts stream events into chunks and releases the connection at the end.</summary>
-    /// <param name="response">The successful response, which this method takes ownership of.</param>
-    /// <param name="cancellationToken">Cancels reading.</param>
+    /// <summary>Converts stream events into chunks.</summary>
+    /// <param name="events">The server-sent events. The transport releases the connection at the end.</param>
     /// <returns>The chunks that carry something useful.</returns>
-    private async IAsyncEnumerable<ChatChunk> ReadChunksAsync(HttpResponseMessage response, [EnumeratorCancellation] CancellationToken cancellationToken)
+    private async IAsyncEnumerable<ChatChunk> ReadChunksAsync(IAsyncEnumerable<SseItem<string>> events)
     {
         var inputTokens = 0;
-        await foreach (var item in SseReader.ReadAsync(name, response, logger, cancellationToken).ConfigureAwait(false))
+        await foreach (var item in events.ConfigureAwait(false))
         {
             var streamEvent = Parse(item);
             switch (streamEvent?.Type)
@@ -182,7 +141,7 @@ internal sealed class AnthropicChatProvider(
     {
         if (item.EventType == "error")
         {
-            throw new ChatStreamException(new EngineError(ErrorKind.Upstream, $"The provider '{name}' failed during the stream."));
+            throw new ChatStreamException(transport.StreamFailed());
         }
 
         try
@@ -191,7 +150,7 @@ internal sealed class AnthropicChatProvider(
         }
         catch (JsonException exception)
         {
-            throw new ChatStreamException(HttpFailure.Malformed(name), exception);
+            throw new ChatStreamException(transport.Malformed(), exception);
         }
     }
 }

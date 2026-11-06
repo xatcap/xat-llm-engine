@@ -69,18 +69,19 @@ public class AnthropicProviderTests
         Assert.Equal("Hello", body.RootElement.GetProperty("messages")[0].GetProperty("content")[0].GetProperty("text").GetString());
     }
 
-    /// <summary>Anthropic requires a token limit, so the configured default fills it in.</summary>
+    /// <summary>The adapter adds no fields of its own. The Application layer adds the token limit, which Anthropic requires.</summary>
     /// <returns>A task for the test.</returns>
     [Fact]
-    public async Task Complete_NoTokenLimit_SendsConfiguredDefault()
+    public async Task Complete_Body_HasOnlyCallerFields()
     {
         var http = new StubHttpHandler(HttpStatusCode.OK, CompletionBody);
 
         await Provider(http).CompleteAsync(TestRequests.Minimal, TestContext.Current.CancellationToken);
 
         using var body = JsonDocument.Parse(http.LastBody!);
-        Assert.Equal(777, body.RootElement.GetProperty("max_tokens").GetInt32());
+        Assert.False(body.RootElement.TryGetProperty("max_tokens", out _));
         Assert.False(body.RootElement.TryGetProperty("system", out _));
+        Assert.Equal(777, Provider(http).MaxTokensLimit);
     }
 
     /// <summary>The provider joins text blocks, and converts the stop reason and token counts.</summary>
@@ -233,9 +234,6 @@ public class AnthropicProviderTests
     /// <returns>The adapter.</returns>
     private static AnthropicChatProvider Provider(StubHttpHandler http, ILogger<AnthropicChatProvider>? logger = null) => new(
         "anthropic",
-        new ProviderOptions { Type = ProviderType.Anthropic, BaseUrl = new Uri("https://api.anthropic.test"), ApiKey = "secret", DefaultMaxTokens = 777 },
-        http,
-        "test",
-        TimeProvider.System,
-        logger ?? NullLogger<AnthropicChatProvider>.Instance);
+        new ProviderOptions { Type = ProviderType.Anthropic, BaseUrl = new Uri("https://api.anthropic.test"), ApiKey = "secret", MaxTokensLimit = 777 },
+        TestTransports.Create(http, logger, "anthropic"));
 }

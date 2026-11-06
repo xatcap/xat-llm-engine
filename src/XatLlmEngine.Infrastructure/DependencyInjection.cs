@@ -1,15 +1,11 @@
-using System.ComponentModel.DataAnnotations;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
-using Microsoft.Extensions.Http.Resilience;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using Polly;
 using XatLlmEngine.Application.Abstractions;
 using XatLlmEngine.Infrastructure.LlamaCpp;
 using XatLlmEngine.Infrastructure.Providers;
-using XatLlmEngine.Infrastructure.Providers.Anthropic;
 using XatLlmEngine.Infrastructure.Providers.OpenAiCompatible;
 
 namespace XatLlmEngine.Infrastructure;
@@ -17,59 +13,97 @@ namespace XatLlmEngine.Infrastructure;
 /// <summary>Registers the Infrastructure layer.</summary>
 public static class DependencyInjection
 {
-    /// <summary>The HTTP client for llama-server. It has no timeout or retries, because local generation can be slow and a local failure will not fix itself.</summary>
+    /// <summary>The HTTP client for llama-server. It has no time limits, because local generation can be slow. The supervisor finds a server that hangs.</summary>
     internal const string LocalHttpClientName = "provider-local";
 
     /// <summary>Adds the local model and every cloud provider that has an API key.</summary>
     /// <param name="services">The service collection to add to.</param>
     /// <param name="configuration">The application configuration.</param>
     /// <returns>The same collection, so that the caller can chain calls.</returns>
-    /// <exception cref="InvalidOperationException">A cloud provider's settings are invalid.</exception>
+    /// <exception cref="InvalidOperationException">The local model settings or a cloud provider's settings are invalid.</exception>
     public static IServiceCollection AddInfrastructure(this IServiceCollection services, IConfiguration configuration)
     {
         // The host or a test can choose another clock before this call.
         services.TryAddSingleton(TimeProvider.System);
-        AddLocalModel(services, configuration);
-
-        var providers = configuration.GetSection(ProviderOptions.SectionName).Get<Dictionary<string, ProviderOptions>>() ?? [];
-        foreach (var (name, options) in providers)
+        AddEngine(services, configuration);
+        var disabled = new List<string>();
+        if (!AddLocalModel(services, configuration))
         {
-            Validate(name, options);
-            if (!string.IsNullOrWhiteSpace(options.ApiKey))
+            disabled.Add(LocalChatProvider.ProviderName);
+        }
+
+        foreach (var (name, options) in ProviderSettings.Read(configuration))
+        {
+            if (string.IsNullOrWhiteSpace(options.ApiKey))
+            {
+                disabled.Add(name);
+            }
+            else
             {
                 AddCloudProvider(services, name, options);
             }
         }
 
+        services.AddSingleton<IDisabledProviders>(new DisabledProviders(disabled));
         return services;
+    }
+
+    /// <summary>Adds the data folder and the lock that allows only one engine for each install folder.</summary>
+    /// <param name="services">The service collection to add to.</param>
+    /// <param name="configuration">The application configuration.</param>
+    /// <exception cref="InvalidOperationException">The engine settings are invalid.</exception>
+    private static void AddEngine(IServiceCollection services, IConfiguration configuration)
+    {
+        var problems = new List<string>();
+        var options = SettingsRules.Bind<EngineOptions>(configuration.GetSection(EngineOptions.SectionName), problems);
+        SettingsRules.ThrowIfAny($"'{EngineOptions.SectionName}'", problems);
+
+        var dataFolder = string.IsNullOrWhiteSpace(options.DataFolder)
+            ? EngineDataFolder.ForThisInstall()
+            : new EngineDataFolder(LlamaServerPaths.FromEngineFolder(options.DataFolder));
+        services.AddSingleton(dataFolder);
+        services.AddSingleton<EngineInstanceLock>();
+        services.AddHostedService(provider => provider.GetRequiredService<EngineInstanceLock>());
+        services.AddSingleton<JsonUsageLedger>();
+        services.AddSingleton<IUsageLedger>(provider => provider.GetRequiredService<JsonUsageLedger>());
+        services.AddHostedService(provider => provider.GetRequiredService<JsonUsageLedger>());
     }
 
     /// <summary>Adds the supervised llama-server, unless the settings turn off the local model.</summary>
     /// <param name="services">The service collection to add to.</param>
     /// <param name="configuration">The application configuration.</param>
-    private static void AddLocalModel(IServiceCollection services, IConfiguration configuration)
+    /// <returns><see langword="true"/> when the local model is on.</returns>
+    /// <exception cref="InvalidOperationException">The local model settings are invalid. The engine checks them also when the local model is off.</exception>
+    private static bool AddLocalModel(IServiceCollection services, IConfiguration configuration)
     {
-        var section = configuration.GetSection(LlamaCppOptions.SectionName);
-        services.AddOptions<LlamaCppOptions>().Bind(section).ValidateDataAnnotations().ValidateOnStart();
+        var problems = new List<string>();
+        var options = SettingsRules.Bind<LlamaCppOptions>(configuration.GetSection(LlamaCppOptions.SectionName), problems);
+        SettingsRules.Validate(options, problems);
+        SettingsRules.ThrowIfAny($"'{LlamaCppOptions.SectionName}'", problems);
 
-        if (!(section.Get<LlamaCppOptions>() ?? new LlamaCppOptions()).Enabled)
+        // One validated object is the only source of these settings.
+        services.AddSingleton(Options.Create(options));
+        if (!options.Enabled)
         {
-            return;
+            return false;
         }
 
-        services.AddHttpClient(LocalHttpClientName, client => client.Timeout = Timeout.InfiniteTimeSpan);
+        AddHttpClient(services, LocalHttpClientName);
+        services.AddSingleton(provider => new LocalRequestGate(options.EffectiveParallel, options.MaxQueuedRequests, provider.GetRequiredService<TimeProvider>()));
         services.AddSingleton<LlamaServerSupervisor>();
         services.AddHostedService(provider => provider.GetRequiredService<LlamaServerSupervisor>());
         services.AddSingleton<IChatProvider>(provider => new LocalChatProvider(
             provider.GetRequiredService<LlamaServerSupervisor>(),
+            provider.GetRequiredService<LocalRequestGate>(),
             new OpenAiClient(
-                LocalChatProvider.ProviderName,
-                provider.GetRequiredService<IHttpClientFactory>(),
-                LocalHttpClientName,
-                provider.GetRequiredService<TimeProvider>(),
-                provider.GetRequiredService<ILogger<OpenAiClient>>()),
+                new ProviderTransport(
+                    new TransportSettings(LocalChatProvider.ProviderName, ProviderKind.Local, LocalHttpClientName, RequestTimeout: null, ReadIdleTimeout: null),
+                    provider.GetRequiredService<IHttpClientFactory>(),
+                    provider.GetRequiredService<TimeProvider>(),
+                    provider.GetRequiredService<ILogger<OpenAiClient>>()),
+                options.RequestFields.Contains("stream_options", StringComparer.Ordinal)),
             provider.GetRequiredService<IOptions<LlamaCppOptions>>()));
-        services.AddHealthChecks().AddCheck<LlamaServerHealthCheck>(LocalModelHealth.EntryName);
+        return true;
     }
 
     /// <summary>Adds one cloud provider and its HTTP client.</summary>
@@ -79,63 +113,28 @@ public static class DependencyInjection
     private static void AddCloudProvider(IServiceCollection services, string name, ProviderOptions options)
     {
         var clientName = $"provider-{name}";
-        services
-            .AddHttpClient(clientName, client => client.Timeout = Timeout.InfiniteTimeSpan)
-            .AddResilienceHandler("upstream", (pipeline, context) =>
-            {
-                var timeProvider = context.ServiceProvider.GetRequiredService<TimeProvider>();
+        var factory = ChatProviderFactories.For(name, options.Type!.Value);
 
-                // The limits cover waiting for a response to start. A stream that has started can run as long as it needs.
-                pipeline.AddTimeout(TimeSpan.FromSeconds(options.RequestTimeoutSeconds));
-                if (options.MaxRetries > 0)
-                {
-                    pipeline.AddRetry(new HttpRetryStrategyOptions
-                    {
-                        MaxRetryAttempts = options.MaxRetries,
-                        BackoffType = DelayBackoffType.Exponential,
-                        UseJitter = true,
-                        MaxDelay = HttpFailure.MaximumRetryDelay,
-                        DelayGenerator = arguments => ValueTask.FromResult(HttpFailure.RetryDelay(arguments.Outcome.Result, timeProvider.GetUtcNow())),
-                    });
-                }
-            });
-
-        services.AddSingleton<IChatProvider>(provider =>
-        {
-            var factory = provider.GetRequiredService<IHttpClientFactory>();
-            var timeProvider = provider.GetRequiredService<TimeProvider>();
-            return options.Type == ProviderType.Anthropic
-                ? new AnthropicChatProvider(name, options, factory, clientName, timeProvider, provider.GetRequiredService<ILogger<AnthropicChatProvider>>())
-                : new OpenAiCompatibleChatProvider(name, options, new OpenAiClient(name, factory, clientName, timeProvider, provider.GetRequiredService<ILogger<OpenAiClient>>()));
-        });
+        // The engine never retries a request. A retry of a generation can cost money twice, so the caller decides. See ADR 0006.
+        // The transport applies the time limits, because they differ for the headers and for the body.
+        AddHttpClient(services, clientName);
+        services.AddSingleton(provider => factory.Create(name, options, clientName, provider));
     }
 
-    /// <summary>Checks a cloud provider's settings, so that a mistake stops the engine at startup rather than failing on a request.</summary>
-    /// <param name="name">The provider's name.</param>
-    /// <param name="options">The provider's settings.</param>
-    /// <exception cref="InvalidOperationException">The settings are invalid.</exception>
-    internal static void Validate(string name, ProviderOptions options)
+    /// <summary>The providers that the configuration has, but that are turned off.</summary>
+    /// <param name="names">The names.</param>
+    private sealed class DisabledProviders(IReadOnlyList<string> names) : IDisabledProviders
     {
-        if (string.Equals(name, LocalChatProvider.ProviderName, StringComparison.OrdinalIgnoreCase) || name.Contains('/', StringComparison.Ordinal))
-        {
-            throw new InvalidOperationException($"A provider cannot use the name '{name}'. The engine reserves the name '{LocalChatProvider.ProviderName}', and names cannot contain '/'.");
-        }
-
-        var results = new List<ValidationResult>();
-        if (!Validator.TryValidateObject(options, new ValidationContext(options), results, validateAllProperties: true))
-        {
-            throw new InvalidOperationException($"The settings of provider '{name}' are invalid: {string.Join(' ', results.Select(result => result.ErrorMessage))}");
-        }
-
-        if (options.BaseUrl is not { IsAbsoluteUri: true })
-        {
-            throw new InvalidOperationException($"The BaseUrl of provider '{name}' must be an absolute address.");
-        }
-
-        // Every request includes the provider's API key, so the engine allows plain HTTP only on this machine.
-        if (options.BaseUrl.Scheme != Uri.UriSchemeHttps && !(options.BaseUrl.Scheme == Uri.UriSchemeHttp && options.BaseUrl.IsLoopback))
-        {
-            throw new InvalidOperationException($"The BaseUrl of provider '{name}' must use https, or http on this machine only.");
-        }
+        /// <inheritdoc/>
+        public IReadOnlyList<string> Names => names;
     }
+
+    /// <summary>Adds a named HTTP client with no time limit of its own, and with redirects turned off.</summary>
+    /// <remarks>.NET removes the Authorization header on a redirect to another host, but it keeps other headers such as Anthropic's x-api-key.</remarks>
+    /// <param name="services">The service collection to add to.</param>
+    /// <param name="name">The client name.</param>
+    private static void AddHttpClient(IServiceCollection services, string name) =>
+        services
+            .AddHttpClient(name, client => client.Timeout = Timeout.InfiniteTimeSpan)
+            .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler { AllowAutoRedirect = false });
 }

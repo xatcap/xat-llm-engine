@@ -16,7 +16,7 @@ public sealed class LlamaCppOptions : IValidatableObject
     /// The list holds only tuning flags. It does not hold flags that take a file path, a URL or a network address.
     /// It also does not hold flags that print or write logs.
     /// Thus the new flags of a later llama.cpp version stop the engine, until a person examines them and adds them here.
-    /// The list is for llama.cpp b12110 (see build/llama-cpp.lock.json). After an upgrade, do these checks:
+    /// The list is for the llama.cpp tag in <see cref="LlamaCppCompatibility.VerifiedTag"/>. After an upgrade, do these checks:
     /// <list type="bullet">
     /// <item>Make sure that each flag still exists. llama-server does not start with an unknown flag.</item>
     /// <item>Make sure that each flag still takes a value, or no value, as this list tells.</item>
@@ -97,7 +97,7 @@ public sealed class LlamaCppOptions : IValidatableObject
     [Required(AllowEmptyStrings = false)]
     public string GpuLayers { get; init; } = "auto";
 
-    /// <summary>Gets how many requests can generate at once. Others wait in llama-server's queue. <c>--parallel</c> in <see cref="ExtraArguments"/> replaces this value.</summary>
+    /// <summary>Gets how many requests can generate at once. The engine sends no more than this number to llama-server. Other requests wait in the engine's queue. <c>--parallel</c> in <see cref="ExtraArguments"/> replaces this value.</summary>
     [Range(MinParallel, MaxParallel)]
     public int Parallel { get; init; } = 1;
 
@@ -105,13 +105,31 @@ public sealed class LlamaCppOptions : IValidatableObject
     [Range(0.0, 2.0)]
     public double DefaultTemperature { get; init; } = 0.07;
 
-    /// <summary>Gets how long a model can take to load, in seconds, before the engine restarts the server.</summary>
+    /// <summary>Gets how long a model can take to load, in seconds. When the time ends, the local model fails, and the engine does not start llama-server again until the engine restarts.</summary>
     [Range(1, 86_400)]
     public int StartupTimeoutSeconds { get; init; } = 600;
 
-    /// <summary>Gets the seconds between health checks of a running server. Three failures in a row cause a restart, because a process that stops responding never exits by itself.</summary>
+    /// <summary>
+    /// Gets the seconds between health checks of a running server. Three failed checks in a row while no request runs cause a restart,
+    /// because a process that stops responding never exits by itself. While requests run, failed checks do not stop the server. See <see cref="UnresponsiveTimeoutSeconds"/>.
+    /// </summary>
     [Range(1, 3_600)]
     public int HealthCheckIntervalSeconds { get; init; } = 10;
+
+    /// <summary>Gets the largest number of output tokens that a caller can ask for, or 0 for no limit. A request with no token field gets this limit.</summary>
+    [Range(0, int.MaxValue)]
+    public int MaxTokensLimit { get; init; }
+
+    /// <summary>Gets how many requests can wait for a free slot. A request that finds the queue full gets status 503 at once. Use 0 to refuse every request that finds no free slot.</summary>
+    [Range(0, 10_000)]
+    public int MaxQueuedRequests { get; init; } = 32;
+
+    /// <summary>
+    /// Gets how long a busy server can fail its health checks and also send no data, in seconds. After this time, the engine stops the
+    /// server and starts it again, and the requests in progress fail. A server that sends data is never stopped.
+    /// </summary>
+    [Range(30, 86_400)]
+    public int UnresponsiveTimeoutSeconds { get; init; } = 300;
 
     /// <summary>Gets more llama-server arguments, for example <c>--threads 4</c> split into two values. The engine allows only tuning flags.</summary>
     public IReadOnlyList<string> ExtraArguments { get; init; } = [];
@@ -145,9 +163,22 @@ public sealed class LlamaCppOptions : IValidatableObject
         return false;
     }
 
+    /// <summary>Gets the number of slots that llama-server really uses: the last value of <c>--parallel</c> in <see cref="ExtraArguments"/>, or else <see cref="Parallel"/>.</summary>
+    internal int EffectiveParallel =>
+        ReadExtraArguments()
+            .Where(entry => entry is { Problem: null, Flag: "-np" or "--parallel" })
+            .Select(entry => int.TryParse(entry.Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var slots) ? slots : (int?)null)
+            .LastOrDefault(slots => slots is >= MinParallel and <= MaxParallel)
+        ?? Parallel;
+
     /// <inheritdoc/>
     public IEnumerable<ValidationResult> Validate(ValidationContext validationContext)
     {
+        if (MaxTokensLimit > 0 && !RequestFields.Contains("max_tokens", StringComparer.Ordinal) && !RequestFields.Contains("max_completion_tokens", StringComparer.Ordinal))
+        {
+            yield return new ValidationResult("MaxTokensLimit needs max_tokens or max_completion_tokens in RequestFields.", [nameof(MaxTokensLimit)]);
+        }
+
         foreach (var entry in ReadExtraArguments())
         {
             if (entry.Problem is not null)
@@ -194,10 +225,8 @@ public sealed class LlamaCppOptions : IValidatableObject
             if (!AllowedFlags.TryGetValue(flag, out var takesValue))
             {
                 // The next entry is probably the value of this flag, so it does not get a second message. An entry that starts with '-' is read as a flag.
-                if (index + 1 < ExtraArguments.Count && ExtraArguments[index + 1] is { } next && !NormalizeFlag(next).StartsWith('-'))
-                {
-                    index++;
-                }
+                var nextIsValue = index + 1 < ExtraArguments.Count && !NormalizeFlag(ExtraArguments[index + 1]).StartsWith('-');
+                index += nextIsValue ? 1 : 0;
 
                 var hint = argument.Contains('=', StringComparison.Ordinal) ? " Write a flag and its value as two entries." : string.Empty;
                 yield return new(argument, flag, null, $"Remove '{argument}' from ExtraArguments. The engine allows only tuning flags.{hint}");

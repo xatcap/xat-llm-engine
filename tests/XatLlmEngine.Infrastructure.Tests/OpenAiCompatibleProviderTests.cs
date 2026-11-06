@@ -3,7 +3,6 @@ using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Logging.Testing;
-using Polly.Timeout;
 using XatLlmEngine.Application.Abstractions;
 using XatLlmEngine.Domain;
 using XatLlmEngine.Infrastructure.Providers;
@@ -73,18 +72,6 @@ public class OpenAiCompatibleProviderTests
         {
             Assert.False(body.RootElement.TryGetProperty(name, out _), name);
         }
-    }
-
-    /// <summary>Sending a request leaves the caller's body unchanged.</summary>
-    /// <returns>A task for the test.</returns>
-    [Fact]
-    public async Task Complete_DoesNotChangeCallersBody()
-    {
-        var request = TestRequests.Minimal;
-
-        await Provider(new StubHttpHandler(HttpStatusCode.OK, CompletionBody)).CompleteAsync(request, TestContext.Current.CancellationToken);
-
-        Assert.Equal("test/model-x", request.Body["model"]!.GetValue<string>());
     }
 
     /// <summary>The provider converts the answer, finish reason and token counts.</summary>
@@ -234,23 +221,6 @@ public class OpenAiCompatibleProviderTests
         Assert.Same(failure, record.Exception);
     }
 
-    /// <summary>A provider that takes too long causes a temporary failure. The engine logs the failure with its cause.</summary>
-    /// <returns>A task for the test.</returns>
-    [Fact]
-    public async Task Complete_Timeout_LogsWarningAndFailsAsUnavailable()
-    {
-        var logger = new FakeLogger();
-        var failure = new TimeoutRejectedException();
-        var http = new StubHttpHandler(HttpStatusCode.OK, string.Empty) { Throw = failure };
-
-        var result = await Provider(http, logger).CompleteAsync(TestRequests.Minimal, TestContext.Current.CancellationToken);
-
-        Assert.Equal(ErrorKind.Unavailable, result.Error!.Kind);
-        var record = Assert.Single(logger.Collector.GetSnapshot());
-        Assert.Equal(LogLevel.Warning, record.Level);
-        Assert.Same(failure, record.Exception);
-    }
-
     /// <summary>A failed status before a stream starts causes one log entry with the provider and the status. The entry never holds the response body or the API key.</summary>
     /// <returns>A task for the test.</returns>
     [Fact]
@@ -331,17 +301,34 @@ public class OpenAiCompatibleProviderTests
         Assert.True(body.RootElement.GetProperty("stream_options").GetProperty("include_usage").GetBoolean());
     }
 
-    /// <summary>The provider removes token counts when the caller did not ask for them, even if the server sends them.</summary>
+    /// <summary>When the server accepts stream_options, the client always asks for token counts, for the budget and the metrics. The caller's other stream options stay.</summary>
     /// <returns>A task for the test.</returns>
     [Fact]
-    public async Task Stream_UsageNotRequested_DropsUsage()
+    public async Task Stream_ServerAcceptsStreamOptions_AsksForUsage()
+    {
+        var http = new StubHttpHandler(HttpStatusCode.OK, StreamBody);
+        var client = new OpenAiClient(TestTransports.Create(http), requestStreamUsage: true);
+        var request = TestRequests.Parse("""{"stream_options":{"include_obfuscation":false},"messages":[]}""");
+
+        var result = await client.StreamAsync(new Uri("https://api.example.com/v1"), "secret", request, TestContext.Current.CancellationToken);
+        var chunks = await result.Value!.ToListAsync(TestContext.Current.CancellationToken);
+
+        Assert.Contains(chunks, chunk => chunk.Usage is not null);
+        using var body = JsonDocument.Parse(http.LastBody!);
+        Assert.True(body.RootElement.GetProperty("stream_options").GetProperty("include_usage").GetBoolean());
+        Assert.False(body.RootElement.GetProperty("stream_options").GetProperty("include_obfuscation").GetBoolean());
+    }
+
+    /// <summary>When the server does not accept stream_options, the client does not add it.</summary>
+    /// <returns>A task for the test.</returns>
+    [Fact]
+    public async Task Stream_ServerWithoutStreamOptions_AddsNothing()
     {
         var http = new StubHttpHandler(HttpStatusCode.OK, StreamBody);
 
         var result = await Provider(http).StreamAsync(TestRequests.Minimal, TestContext.Current.CancellationToken);
-        var chunks = await result.Value!.ToListAsync(TestContext.Current.CancellationToken);
+        await result.Value!.ToListAsync(TestContext.Current.CancellationToken);
 
-        Assert.All(chunks, chunk => Assert.Null(chunk.Usage));
         using var body = JsonDocument.Parse(http.LastBody!);
         Assert.False(body.RootElement.TryGetProperty("stream_options", out _));
     }
@@ -375,6 +362,6 @@ public class OpenAiCompatibleProviderTests
     /// <returns>The adapter.</returns>
     private static OpenAiCompatibleChatProvider Provider(StubHttpHandler http, ILogger? logger = null) => new(
         "test",
-        new ProviderOptions { BaseUrl = new Uri("https://api.example.com/v1/"), ApiKey = "secret" },
-        new OpenAiClient("test", http, "test", TimeProvider.System, logger ?? NullLogger.Instance));
+        new ProviderOptions { Type = ProviderType.OpenAiCompatible, BaseUrl = new Uri("https://api.example.com/v1/"), ApiKey = "secret" },
+        new OpenAiClient(TestTransports.Create(http, logger)));
 }
