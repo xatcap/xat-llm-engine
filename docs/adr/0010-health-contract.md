@@ -46,7 +46,7 @@ The engine does not test cloud providers, so an enabled cloud provider is `ready
 | `GET /health/ready` | 200 when the overall status is not `unhealthy`, otherwise 503. | An app that waits before it sends requests. |
 | `GET /health/ready?provider=<name>` | 200 when that provider can take requests, otherwise 503. | An app that needs one provider, for example `local`. |
 
-The health routes show provider names. The engine listens only on loopback (see the README), so only programs on the same machine can read them.
+The health routes show provider names. The engine listens only on loopback (see [Network access](../configuration.md#network-access)), so only programs on the same machine can read them.
 
 ## Consequences
 

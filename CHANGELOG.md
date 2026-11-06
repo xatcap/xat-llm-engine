@@ -19,7 +19,7 @@ The release workflow uses the section of each version as its release notes. Writ
   - tokens,
   - `llama-server` restarts, and
   - the local queue.
-  See "Monitor" in the README.
+  See "Monitor" in `docs/operations.md`.
 - The `X-Request-Id` response header. Every log line of a request holds the same ID. Each chat request writes one log line. The line holds these values:
   - the model,
   - the status,

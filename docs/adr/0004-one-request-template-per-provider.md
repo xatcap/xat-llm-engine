@@ -14,7 +14,7 @@ The engine silently removed fields that it did not know. ADR 0002 says that unsu
 
 Each provider lists the request fields it accepts as `RequestFields` in configuration. This list is the provider's request template.
 
-Callers send the native format of the provider they name. The engine forwards each listed field unchanged, except for the defaults that the README lists under "Request templates". The README is the contract for these defaults. The engine returns a 400 error for any other top-level field. Responses stay in one unified format.
+Callers send the native format of the provider they name. The engine forwards each listed field unchanged, except for the defaults that [the API reference](../api.md#request-templates) lists under "Request templates". That section is the contract for these defaults. The engine returns a 400 error for any other top-level field. Responses stay in one unified format.
 
 This decision replaces two parts of ADR 0002. The consequence "Existing OpenAI clients work by changing their base URL and model name" now applies only to providers that use the OpenAI format. The part that gives one request format for all providers no longer holds.
 

@@ -35,7 +35,7 @@ Any program on the machine can call the engine, and each cloud request costs mon
 - One request cannot ask for more tokens than the limit.
 - A provider can go over its budget by the requests that run at the same time. Each of them can use up to its token limit. Set the budget with this in mind.
 - An estimate is not exact. It is more likely too high than too low.
-- The engine adds fields to the request: the token limit and `stream_options.include_usage`. The README lists them. ADR 0004 is changed to match.
+- The engine adds fields to the request: the token limit and `stream_options.include_usage`. [The API reference](../api.md#request-templates) lists them. ADR 0004 is changed to match.
 - `DefaultMaxTokens` is gone. A configuration that still has it stops the engine at startup.
 
 ## Alternatives considered
