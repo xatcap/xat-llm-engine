@@ -28,7 +28,21 @@ The ADRs record the significant decisions and their reasons. Read them before yo
 | [0001. Run llama.cpp as a child process](docs/adr/0001-run-llama-cpp-as-child-process.md) | Accepted |
 | [0002. Expose an OpenAI-compatible API, with plain HTTP adapters](docs/adr/0002-openai-compatible-api-and-http-adapters.md) | Partly replaced by 0004 |
 | [0003. Attach the model as a separate release file](docs/adr/0003-release-packaging.md) | Accepted |
-| [0004. Give each provider its own request template](docs/adr/0004-one-request-template-per-provider.md) | Accepted |
+| [0004. Give each provider its own request template](docs/adr/0004-one-request-template-per-provider.md) | Accepted, amended |
+| [0005. Use Semantic Versioning, a changelog and locked packages](docs/adr/0005-versioning-policy.md) | Accepted |
+| [0006. Never retry a request, and limit the time of each part of a request](docs/adr/0006-no-retries-and-time-limits.md) | Accepted |
+| [0007. Map each kind of failure to one status code and one error type](docs/adr/0007-error-model-and-status-codes.md) | Accepted |
+| [0008. Read the first piece before the success status](docs/adr/0008-streaming-contract.md) | Accepted |
+| [0009. Queue local requests in the engine, and stop a busy server only when it sends nothing](docs/adr/0009-local-load-and-hang-policy.md) | Accepted |
+| [0010. Report the health of each provider, with stable values](docs/adr/0010-health-contract.md) | Accepted |
+| [0011. Limit the cost of cloud providers with a token limit and a token budget](docs/adr/0011-cost-control.md) | Accepted |
+| [0005. Use Semantic Versioning, a changelog and locked packages](docs/adr/0005-versioning-policy.md) | Accepted |
+| [0006. Never retry a request, and limit the time of each part of a request](docs/adr/0006-no-retries-and-time-limits.md) | Accepted |
+| [0007. Map each kind of failure to one status code and one error type](docs/adr/0007-error-model-and-status-codes.md) | Accepted |
+| [0008. Read the first piece before the success status](docs/adr/0008-streaming-contract.md) | Accepted |
+| [0009. Queue local requests in the engine, and stop a busy server only when it sends nothing](docs/adr/0009-local-load-and-hang-policy.md) | Accepted |
+| [0010. Report the health of each provider, with stable values](docs/adr/0010-health-contract.md) | Accepted |
+| [0011. Limit the cost of cloud providers with a token limit and a token budget](docs/adr/0011-cost-control.md) | Accepted |
 
 ## Engineering guidelines
 
@@ -56,7 +70,10 @@ These pages are a shared baseline for Flutter clients. The [index](docs/flutter/
 
 | File | What it covers |
 |------|----------------|
+| [CHANGELOG.md](CHANGELOG.md) | The changes in each release. Add an entry under `Unreleased` for each change that people can see. |
 | [build/THIRD_PARTY_NOTICES.md](build/THIRD_PARTY_NOTICES.md) | Third-party software in the release packages, and their licenses. |
+| [build/third-party.json](build/third-party.json) | The list of shipped third-party components and their license files, which `release.py check-notices` checks. |
+| [build/release.py](build/release.py) | The release script: `package`, `fetch-model`, `smoke-test`, `finalize`, `check-changelog` and `check-notices`. |
 | [build/llama-cpp.lock.json](build/llama-cpp.lock.json) | The pinned llama.cpp build. |
 | [build/model.lock.json](build/model.lock.json) | The pinned local model file. |
 | [.github/workflows/ci.yml](.github/workflows/ci.yml) | The CI build and tests. |

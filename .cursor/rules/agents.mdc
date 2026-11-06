@@ -1,8 +1,0 @@
----
-description: Points to AGENTS.md, which holds the instructions and the documentation index for this repository.
-alwaysApply: true
----
-
-IMPORTANT: Ensure you’ve thoroughly reviewed the [AGENTS.md](../../AGENTS.md) file before beginning any work.
-
-@AGENTS.md
