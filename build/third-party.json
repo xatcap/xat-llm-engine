@@ -1,0 +1,39 @@
+{
+  "comment": "Every third-party component that the release packages ship, and its license files. 'release.py check-notices' fails when a shipped NuGet package is not here, or when a file is missing. Paths in 'files' start at build/licenses.",
+  "nuget": {
+    "Microsoft.AspNetCore.OpenApi": {
+      "license": "MIT",
+      "files": ["nuget/Microsoft-MIT.txt"],
+      "packageFiles": ["THIRD-PARTY-NOTICES.TXT"]
+    },
+    "Microsoft.OpenApi": {
+      "license": "MIT",
+      "files": ["nuget/Microsoft.OpenApi.txt"]
+    },
+    "Swashbuckle.AspNetCore.SwaggerUI": {
+      "license": "MIT",
+      "files": ["nuget/Swashbuckle.AspNetCore.txt", "nuget/swagger-ui-LICENSE.txt", "nuget/swagger-ui-NOTICE.txt"],
+      "bundles": "swagger-ui 5.33.3 (Apache-2.0)"
+    }
+  },
+  "buildOnly": ["StyleCop.Analyzers", "Microsoft.NET.ILLink.Tasks"],
+  "runtimePacks": {
+    "Microsoft.NETCore.App.Runtime": ["LICENSE.TXT", "THIRD-PARTY-NOTICES.TXT"],
+    "Microsoft.AspNetCore.App.Runtime": ["LICENSE.txt", "THIRD-PARTY-NOTICES.TXT"]
+  },
+  "llamaCpp": {
+    "license": "MIT",
+    "archiveFile": "LICENSE",
+    "bundled": {
+      "cpp-httplib": "llama.cpp/cpp-httplib.txt",
+      "nlohmann/json": "llama.cpp/nlohmann-json.txt",
+      "miniaudio": "llama.cpp/miniaudio.txt",
+      "stb_image": "llama.cpp/stb_image.txt",
+      "sheredom/subprocess": "llama.cpp/sheredom-subprocess.txt",
+      "SHA-1 in C": "llama.cpp/sha1.txt",
+      "SHA-256 (Igor Pavlov)": "llama.cpp/sha256.txt",
+      "xxHash": "llama.cpp/xxhash.txt",
+      "rotate-bits": "llama.cpp/rotate-bits.txt"
+    }
+  }
+}

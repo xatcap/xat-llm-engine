@@ -6,6 +6,8 @@ Commands:
   fetch-model Downloads the pinned model and checks its hash.
   smoke-test  Runs a built package with the real model, and sends real chat requests.
   finalize    Checks the size limit and writes SHA256SUMS for a folder of release files.
+  check-changelog Checks that CHANGELOG.md has a section for a version, and can write that section as release notes.
+  check-notices   Checks that build/third-party.json lists every package that the engine ships, with its license files.
 """
 import argparse
 import contextlib
@@ -28,6 +30,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 BUILD = ROOT / "build"
 HOST_PROJECT = ROOT / "src" / "XatLlmEngine.Host" / "XatLlmEngine.Host.csproj"
+CHANGELOG = ROOT / "CHANGELOG.md"
+LICENSES = BUILD / "licenses"
+HOST_LOCK = ROOT / "src" / "XatLlmEngine.Host" / "packages.lock.json"
+HOST_ASSETS = ROOT / "src" / "XatLlmEngine.Host" / "obj" / "project.assets.json"
 PROGRAM = "XatLlmEngine.Host"
 GITHUB_ASSET_LIMIT = 2 * 1024**3  # GitHub requires each release file to be under 2 GiB.
 
@@ -147,14 +153,17 @@ def package(args):
     shutil.rmtree(stage, ignore_errors=True)
     stage.mkdir(parents=True)
 
+    # NuGet refuses a locked restore with --runtime when the lock file holds several platforms. RuntimeIdentifiers in the
+    # projects already restores the packages of each platform, so a locked restore comes first, and the publish does not restore.
+    subprocess.run([os.environ.get("DOTNET", "dotnet"), "restore", str(HOST_PROJECT), "--locked-mode"], check=True, cwd=ROOT)
     subprocess.run(
         [
             os.environ.get("DOTNET", "dotnet"), "publish", str(HOST_PROJECT),
+            "--no-restore",
             "--configuration", "Release",
             "--runtime", rid,
             "--self-contained", "true",
             "--output", str(stage),
-            "-p:PublishSingleFile=true",
             "-p:DebugType=none",
             f"-p:Version={args.version}",
         ],
@@ -178,6 +187,7 @@ def package(args):
     shutil.copy(BUILD / "models-README.txt", models / "README.txt")
     shutil.copy(ROOT / "LICENSE", stage / "LICENSE")
     shutil.copy(BUILD / "THIRD_PARTY_NOTICES.md", stage / "THIRD_PARTY_NOTICES.md")
+    copy_licenses(stage, rid)
 
     if rid.startswith("win"):
         target = output / f"{name}.zip"
@@ -192,6 +202,103 @@ def package(args):
             bundle.add(stage, arcname=name, filter=clean_tar_entry)
 
     print(f"Package: {target} ({target.stat().st_size / 1024**2:.1f} MiB)")
+
+
+def load_manifest():
+    return json.loads((BUILD / "third-party.json").read_text(encoding="utf-8"))
+
+
+def shipped_packages():
+    """Returns the NuGet packages that the Host lock file resolves, as name to version. Projects are the engine's own code."""
+    lock = json.loads(HOST_LOCK.read_text(encoding="utf-8"))
+    packages = {}
+    for section in lock["dependencies"].values():
+        for name, info in section.items():
+            if info.get("type") in ("Direct", "Transitive"):
+                packages[name] = info["resolved"]
+    return packages
+
+
+def notice_problems():
+    """Compares the manifest with the lock file, the license files and THIRD_PARTY_NOTICES.md."""
+    manifest = load_manifest()
+    notices = (BUILD / "THIRD_PARTY_NOTICES.md").read_text(encoding="utf-8")
+    problems = []
+    packages = shipped_packages()
+    for name in sorted(packages):
+        if name not in manifest["nuget"] and name not in manifest["buildOnly"]:
+            problems.append(f"The package {name} {packages[name]} ships with the engine, but build/third-party.json does not list it. Add it with its license files.")
+    for name in sorted(set(manifest["nuget"]) - set(packages)):
+        problems.append(f"build/third-party.json lists {name}, but the engine no longer uses it. Remove it.")
+    files = [file for entry in manifest["nuget"].values() for file in entry["files"]] + list(manifest["llamaCpp"]["bundled"].values())
+    problems += [f"The license file build/licenses/{file} does not exist." for file in files if not (LICENSES / file).is_file()]
+    names = list(manifest["nuget"]) + list(manifest["llamaCpp"]["bundled"])
+    problems += [f"THIRD_PARTY_NOTICES.md does not name {name}." for name in names if name not in notices]
+    return problems
+
+
+def check_notices(args):
+    problems = notice_problems()
+    if problems:
+        sys.exit("\n".join(problems))
+    print("build/third-party.json lists every shipped package, and every license file exists.")
+
+
+def copy_licenses(stage, rid):
+    """Copies the full license and notice texts into the package. It stops the build when a text is missing."""
+    problems = notice_problems()
+    if problems:
+        sys.exit("\n".join(problems))
+    manifest = load_manifest()
+    target = stage / "licenses"
+
+    llama_license = stage / "llama" / manifest["llamaCpp"]["archiveFile"]
+    if not llama_license.is_file():
+        sys.exit(f"The llama.cpp archive has no {manifest['llamaCpp']['archiveFile']}, so the package would ship llama.cpp without its license.")
+    (target / "llama.cpp").mkdir(parents=True)
+    shutil.copy(llama_license, target / "llama.cpp" / "LICENSE")
+    for file in manifest["llamaCpp"]["bundled"].values():
+        shutil.copy(LICENSES / file, target / file)
+
+    # The restore output names the exact packages of the build, and the folder that holds them.
+    assets = json.loads(HOST_ASSETS.read_text(encoding="utf-8"))
+    package_root = Path(assets["project"]["restore"]["packagesPath"])
+    packages = shipped_packages()
+    for name, entry in manifest["nuget"].items():
+        folder = target / "nuget" / name
+        folder.mkdir(parents=True)
+        for file in entry["files"]:
+            shutil.copy(LICENSES / file, folder / Path(file).name)
+        for file in entry.get("packageFiles", []):
+            source = package_root / name.lower() / packages[name] / file
+            if not source.is_file():
+                sys.exit(f"The package {name} {packages[name]} has no {file}.")
+            shutil.copy(source, folder / file)
+
+    downloads = {item["name"]: item["version"].strip("[]").split(",")[0].strip() for framework in assets["project"]["frameworks"].values() for item in framework.get("downloadDependencies", [])}
+    for pack, files in manifest["runtimePacks"].items():
+        name = f"{pack}.{rid}"
+        if name not in downloads:
+            sys.exit(f"The restore output has no {name}.")
+        folder = target / "dotnet" / pack
+        folder.mkdir(parents=True)
+        for file in files:
+            source = package_root / name.lower() / downloads[name] / file
+            if not source.is_file():
+                sys.exit(f"The runtime pack {name} {downloads[name]} has no {file}.")
+            shutil.copy(source, folder / file)
+
+
+def expected_license_files():
+    """Gives the license files that every package must contain, relative to its root folder."""
+    manifest = load_manifest()
+    files = ["LICENSE", "THIRD_PARTY_NOTICES.md", "llama/LICENSE", "licenses/llama.cpp/LICENSE"]
+    files += [f"licenses/{file}" for file in manifest["llamaCpp"]["bundled"].values()]
+    for name, entry in manifest["nuget"].items():
+        files += [f"licenses/nuget/{name}/{Path(file).name}" for file in entry["files"] + entry.get("packageFiles", [])]
+    for pack, pack_files in manifest["runtimePacks"].items():
+        files += [f"licenses/dotnet/{pack}/{file}" for file in pack_files]
+    return files
 
 
 def fetch_model(args):
@@ -236,6 +343,9 @@ def smoke_test(args):
         program = root / program_file_name(rid)
         if not (root / "llama" / server_file_name(rid)).exists():
             sys.exit("The package has no llama-server.")
+        missing = [file for file in expected_license_files() if not (root / file).is_file()]
+        if missing:
+            sys.exit(f"The package has no license file {', '.join(missing)}.")
         # A hard link avoids copying 2 GiB.
         os.link(model, root / "models" / model.name)
 
@@ -256,6 +366,8 @@ def smoke_test(args):
                     print(f"Health: {health}", flush=True)
                     if health["local"] == "ready":
                         break
+                    if health["local"] == "failed":
+                        sys.exit("The local model failed. See the engine output above.")
                     if health["local"] == "missing":
                         sys.exit("The engine could not find the model or llama-server.")
                 except (urllib.error.URLError, ConnectionError, TimeoutError):
@@ -263,6 +375,11 @@ def smoke_test(args):
                 if time.monotonic() > deadline:
                     sys.exit("The model did not load in time.")
                 time.sleep(2)
+
+            # The ready route must agree with /health.
+            ready = urllib.request.urlopen(f"{base}/health/ready?provider=local", timeout=5)
+            if ready.status != 200:
+                sys.exit(f"/health/ready?provider=local returned {ready.status}.")
 
             models = http_json(f"{base}/v1/models")
             ids = [item["id"] for item in models["data"]]
@@ -334,6 +451,51 @@ def finalize(args):
     print("All files are under the limit. The script wrote SHA256SUMS.")
 
 
+CHANGELOG_HEADING = re.compile(r"^## \[(?P<label>[^\]]+)\](?: - (?P<date>\d{4}-\d{2}-\d{2}))?\s*$")
+
+
+def changelog_sections(text):
+    """Returns each '## [label]' section of a Keep a Changelog file as (label, date, body), in file order."""
+    sections = []
+    current = None
+    for line in text.splitlines():
+        match = CHANGELOG_HEADING.match(line)
+        if match:
+            current = [match["label"], match["date"], []]
+            sections.append(current)
+        elif line.startswith("## "):
+            sys.exit(f"CHANGELOG.md has a heading that is not '## [version] - YYYY-MM-DD' or '## [Unreleased]': {line!r}")
+        elif current is not None:
+            current[2].append(line)
+    return [(label, date, "\n".join(body).strip()) for label, date, body in sections]
+
+
+def check_changelog(args):
+    if not CHANGELOG.exists():
+        sys.exit("CHANGELOG.md does not exist.")
+    sections = changelog_sections(CHANGELOG.read_text(encoding="utf-8"))
+    labels = [label for label, _, _ in sections]
+    if not sections or labels[0] != "Unreleased":
+        sys.exit("The first section of CHANGELOG.md must be '## [Unreleased]'.")
+    duplicates = {label for label in labels if labels.count(label) > 1}
+    if duplicates:
+        sys.exit(f"CHANGELOG.md has more than one section for: {', '.join(sorted(duplicates))}")
+    for label, date, _ in sections[1:]:
+        if not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?", label) or date is None:
+            sys.exit(f"The CHANGELOG.md section '{label}' must be a version with a date, for example '## [1.2.3] - 2026-01-31'.")
+
+    wanted = args.version or "Unreleased"
+    section = next((entry for entry in sections if entry[0] == wanted), None)
+    if section is None:
+        sys.exit(f"CHANGELOG.md has no section for {wanted}. Add '## [{wanted}] - YYYY-MM-DD' before you push the tag.")
+    if args.version and not section[2]:
+        sys.exit(f"The CHANGELOG.md section for {wanted} is empty.")
+
+    if args.notes:
+        Path(args.notes).write_text((section[2] or "No changes are recorded.") + "\n", encoding="utf-8")
+    print(f"CHANGELOG.md has a valid section for {wanted}.")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     commands = parser.add_subparsers(required=True)
@@ -355,6 +517,14 @@ def main():
     command.add_argument("--gpu-layers", help="Overrides the GPU layer setting, for runners with an unusable GPU.")
     command.add_argument("--load-timeout", type=int, default=600)
     command.set_defaults(run=smoke_test)
+
+    command = commands.add_parser("check-changelog")
+    command.add_argument("--version", type=version_argument, help="The release version. Without it, the command checks the Unreleased section.")
+    command.add_argument("--notes", help="Writes the body of the section to this file, for the release notes.")
+    command.set_defaults(run=check_changelog)
+
+    command = commands.add_parser("check-notices")
+    command.set_defaults(run=check_notices)
 
     command = commands.add_parser("finalize")
     command.add_argument("--folder", required=True)

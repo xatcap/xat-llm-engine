@@ -1,0 +1,4 @@
+Source: https://github.com/swagger-api/swagger-ui/blob/v5.33.3/NOTICE
+
+swagger-ui
+Copyright 2020-2021 SmartBear Software Inc.
