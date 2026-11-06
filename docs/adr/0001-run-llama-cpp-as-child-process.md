@@ -24,7 +24,7 @@ The key goes through the `LLAMA_API_KEY` environment variable, because command-l
 - A llama.cpp crash cannot stop the API. Cloud providers continue to work while the server restarts.
 - To upgrade llama.cpp, change `build/llama-cpp.lock.json`. You do not have to write bindings again. A test then fails until a person checks the engine's llama.cpp rules against the new source and changes `LlamaCppCompatibility.VerifiedTag`.
 - `llama-server` speaks the OpenAI protocol, so it shares its adapter with cloud providers.
-- If the engine is killed, it cannot stop the child process. A PID file in the engine's data folder lets the next start stop a leftover server. It does so only if the process name and start time both match the record. Until then, the leftover keeps the model in memory.
+- If the engine is killed, it cannot stop the child process. Amendment 3 changes this on Windows. A PID file in the engine's data folder lets the next start stop a leftover server. It does so only if the process name and start time both match the record. Until then, the leftover keeps the model in memory.
 - Only one engine can run per install. See Amendment 2.
 - Each request makes one more local HTTP call. The time for this call is small compared with the generation time.
 
@@ -64,6 +64,15 @@ Reason: a wrong setting does not correct itself. A restart loop hid the cause, a
   - the crash budget, and
   - the hang rules.
   Unit tests can check each class alone.
+
+## Amendment 3 (2026-11-06)
+
+A desktop app can include the engine and start it. This amendment gives the app a clean stop, and limits the servers that a killed engine leaves.
+
+- **Stop when the input closes.** When `Engine:StopWhenInputCloses` is `true`, the engine stops when its standard input closes. The system closes the input when the parent app stops, also after a crash. This is the same on every system, and it is the only clean stop that a parent app on Windows has. The setting is off by default, because a service manager can give an input that closes at once.
+- **Windows.** The engine puts `llama-server` in a job object with the "kill on job close" limit. When the engine process ends, also after a kill, Windows stops `llama-server`.
+- **macOS and Linux.** .NET cannot run code in the child process before the program starts, so the engine cannot use `PR_SET_PDEATHSIG` or a new process group. A killed engine still leaves `llama-server` running until the next start. A parent app can stop both with a signal to the engine's process group, because `llama-server` stays in that group.
+- **A watch of the parent process ID** was not added. The input close covers the same case, and it needs no polling and no check against a reused process ID.
 
 ## Alternatives considered
 

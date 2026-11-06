@@ -21,7 +21,7 @@ Any program on the machine can call the engine, and each cloud request costs mon
 **A token budget for each cloud provider.** `TokenBudget` is the largest number of tokens for a rolling period. Input and output tokens both count. 0 means no budget. The length of the period is `BudgetPeriodHours` (default 24 hours):
 
 - Before each request, the engine adds the tokens of the period. When the sum is at the budget or above it, the request gets 429 with the type `budget_exceeded_error`. `Retry-After` is the time until enough old tokens leave the period. It has no 30-second limit.
-- `/health` reports the provider as `budget_exhausted`.
+- `/health` reports the provider as `budget_exhausted`. Since the amendment of ADR 0010, `/health` also gives the use of the budget at all times.
 - After each answer, the engine adds its tokens. When the provider reports no tokens, the engine estimates them at 3 bytes of text for each token. This includes a stream that broke or that the caller stopped. A request that the caller canceled before any answer counts the estimate of its input, because the provider can have billed it. A request that failed before any answer counts no tokens.
 - The counts are in hourly buckets in `usage.json` in the engine's data folder, so they survive a restart. One writer saves the newest state after each change. It writes a new file and then replaces the old one, so a crash never leaves half a file. A crash can lose the last changes.
 - A file that the engine cannot read is kept as `usage.json.corrupt-<time>`, and the counts start from zero. The engine logs an error.

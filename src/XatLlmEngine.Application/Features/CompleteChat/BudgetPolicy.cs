@@ -13,6 +13,23 @@ internal sealed class BudgetPolicy(IUsageLedger? ledger, TimeProvider timeProvid
     /// <returns>The problem, or <see langword="null"/> when the request can go ahead.</returns>
     public EngineError? Check(IChatProvider provider)
     {
+        if (Usage(provider) is not { AvailableAt: { } availableAt } use)
+        {
+            return null;
+        }
+
+        var wait = availableAt - timeProvider.GetUtcNow();
+        return new EngineError(
+            ErrorKind.BudgetExceeded,
+            $"The token budget of the provider '{provider.Name}' is used up: {use.Used} of {use.Limit} tokens in the last {use.Period.TotalHours:0} hours. Requests can continue after {availableAt.UtcDateTime:yyyy-MM-dd HH:mm} UTC.",
+            wait > TimeSpan.Zero ? wait : TimeSpan.FromSeconds(1));
+    }
+
+    /// <summary>Gives the budget use of a provider now. The ledger is read once, so the use and the state always agree.</summary>
+    /// <param name="provider">The provider.</param>
+    /// <returns>The use, or <see langword="null"/> when no budget applies to the provider.</returns>
+    public BudgetUse? Usage(IChatProvider provider)
+    {
         if (ledger is null || provider.Budget is not { } budget)
         {
             return null;
@@ -20,24 +37,9 @@ internal sealed class BudgetPolicy(IUsageLedger? ledger, TimeProvider timeProvid
 
         var now = timeProvider.GetUtcNow();
         var used = ledger.Used(provider.Name, budget.Period, now);
-        if (used < budget.Tokens)
-        {
-            return null;
-        }
-
-        var availableAt = ledger.AvailableAt(provider.Name, budget, now);
-        var wait = availableAt - now;
-        return new EngineError(
-            ErrorKind.BudgetExceeded,
-            $"The token budget of the provider '{provider.Name}' is used up: {used} of {budget.Tokens} tokens in the last {budget.Period.TotalHours:0} hours. Requests can continue after {availableAt.UtcDateTime:yyyy-MM-dd HH:mm} UTC.",
-            wait > TimeSpan.Zero ? wait : TimeSpan.FromSeconds(1));
+        DateTimeOffset? availableAt = used >= budget.Tokens ? ledger.AvailableAt(provider.Name, budget, now) : null;
+        return new BudgetUse(used, budget.Tokens, budget.Period, availableAt);
     }
-
-    /// <summary>Tells whether a provider has used its budget, for the health route.</summary>
-    /// <param name="provider">The provider.</param>
-    /// <returns><see langword="true"/> when the engine refuses the provider's requests now.</returns>
-    public bool IsExhausted(IChatProvider provider) =>
-        ledger is not null && provider.Budget is { } budget && ledger.Used(provider.Name, budget.Period, timeProvider.GetUtcNow()) >= budget.Tokens;
 
     /// <summary>Records the tokens of a finished request.</summary>
     /// <param name="provider">The provider.</param>

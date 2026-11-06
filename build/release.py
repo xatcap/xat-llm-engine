@@ -5,6 +5,7 @@ Commands:
   package     Builds the engine package for one platform, with the pinned llama.cpp build inside.
   fetch-model Downloads the pinned model and checks its hash.
   smoke-test  Runs a built package with the real model, and sends real chat requests.
+  openapi     Writes the API document (docs/openapi.json) with the release version, for the release.
   finalize    Checks the size limit and writes SHA256SUMS for a folder of release files.
   check-changelog Checks that CHANGELOG.md has a section for a version, and can write that section as release notes.
   check-notices   Checks that build/third-party.json lists every package that the engine ships, with its license files.
@@ -16,7 +17,6 @@ import json
 import os
 import re
 import shutil
-import socket
 import subprocess
 import sys
 import tarfile
@@ -100,12 +100,12 @@ def clean_tar_entry(entry):
     return entry
 
 
-def stop_engine(engine, rid):
-    """Stops the engine. Windows has no gentle signal here, so this stops the whole process tree, which also frees the files."""
+def kill_engine(engine, rid):
+    """Stops the engine and its child processes by force, after the clean stop failed."""
     if rid.startswith("win"):
         subprocess.run(["taskkill", "/T", "/F", "/PID", str(engine.pid)], check=False)
     else:
-        engine.terminate()
+        engine.kill()
 
 
 @contextlib.contextmanager
@@ -308,12 +308,6 @@ def fetch_model(args):
     print(f"Model: {path}")
 
 
-def free_port():
-    with socket.socket() as probe:
-        probe.bind(("127.0.0.1", 0))
-        return probe.getsockname()[1]
-
-
 def http_json(url, body=None, timeout=900):
     data = None if body is None else json.dumps(body).encode()
     request = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"})
@@ -349,14 +343,21 @@ def smoke_test(args):
         # A hard link avoids copying 2 GiB.
         os.link(model, root / "models" / model.name)
 
-        port = free_port()
-        base = f"http://127.0.0.1:{port}"
-        environment = dict(os.environ, Urls=base)
+        # The test starts the engine as an app that includes it does: the system chooses the port, the engine writes its
+        # address to the ready file, and the engine stops when its standard input closes.
+        ready_file = Path(work) / "ready.json"
+        environment = dict(
+            os.environ,
+            Urls="http://127.0.0.1:0",
+            Engine__ReadyFile=str(ready_file),
+            Engine__StopWhenInputCloses="true",
+        )
         if args.gpu_layers:
             environment["LocalModel__GpuLayers"] = args.gpu_layers
         # The working folder is deliberately different, to prove that the engine finds its files from its own location.
-        engine = subprocess.Popen([str(program)], env=environment, cwd=tempfile.gettempdir())
+        engine = subprocess.Popen([str(program)], env=environment, cwd=tempfile.gettempdir(), stdin=subprocess.PIPE)
         try:
+            base = read_ready_file(engine, ready_file, deadline=time.monotonic() + 60)
             deadline = time.monotonic() + args.load_timeout
             while True:
                 if engine.poll() is not None:
@@ -418,21 +419,49 @@ def smoke_test(args):
             if not done or not "".join(pieces).strip():
                 sys.exit("The stream was incomplete.")
         finally:
-            stop_engine(engine, rid)
+            # A closed input is the clean stop on every system, also on Windows.
+            engine.stdin.close()
             try:
                 engine.wait(timeout=30)
             except subprocess.TimeoutExpired:
-                engine.kill()
-                sys.exit("The engine did not stop in time.")
+                kill_engine(engine, rid)
+                sys.exit("The engine did not stop in time after its input closed.")
 
-        # On Windows the test stops the whole tree itself, so this check would prove nothing there.
-        if not rid.startswith("win"):
-            deadline = time.monotonic() + 15
-            while process_exists_with_server_name(rid):
-                if time.monotonic() > deadline:
-                    sys.exit("llama-server continued to run after the engine stopped.")
-                time.sleep(0.5)
+        if ready_file.exists():
+            sys.exit("The engine did not delete the ready file when it stopped.")
+        deadline = time.monotonic() + 15
+        while process_exists_with_server_name(rid):
+            if time.monotonic() > deadline:
+                sys.exit("llama-server continued to run after the engine stopped.")
+            time.sleep(0.5)
     print("Smoke test passed.")
+
+
+def read_ready_file(engine, ready_file, deadline):
+    """Waits for the ready file, and gives the engine's address from it."""
+    while not ready_file.exists():
+        if engine.poll() is not None:
+            sys.exit(f"The engine exited early with code {engine.returncode}.")
+        if time.monotonic() > deadline:
+            sys.exit("The engine did not write the ready file in time.")
+        time.sleep(0.5)
+    ready = json.loads(ready_file.read_text(encoding="utf-8"))
+    print(f"Ready file: {ready}", flush=True)
+    if ready.get("pid") != engine.pid:
+        sys.exit(f"The ready file has the process ID {ready.get('pid')}, but the engine is {engine.pid}.")
+    if not ready.get("url", "").startswith("http://127.0.0.1:") or ready["url"].endswith(":0"):
+        sys.exit(f"The ready file has the wrong address {ready.get('url')!r}.")
+    return ready["url"]
+
+
+def openapi(args):
+    """Writes the committed API document with the release version, for the release. A test keeps docs/openapi.json the same as the code."""
+    document = json.loads((ROOT / "docs" / "openapi.json").read_text(encoding="utf-8"))
+    document["info"]["version"] = args.version
+    target = Path(args.output) / f"xat-llm-engine-{args.version}-openapi.json"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(json.dumps(document, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    print(f"API document: {target}")
 
 
 def finalize(args):
@@ -525,6 +554,11 @@ def main():
 
     command = commands.add_parser("check-notices")
     command.set_defaults(run=check_notices)
+
+    command = commands.add_parser("openapi")
+    command.add_argument("--version", required=True, type=version_argument)
+    command.add_argument("--output", required=True)
+    command.set_defaults(run=openapi)
 
     command = commands.add_parser("finalize")
     command.add_argument("--folder", required=True)

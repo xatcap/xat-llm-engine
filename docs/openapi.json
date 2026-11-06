@@ -1,0 +1,587 @@
+{
+  "openapi": "3.1.1",
+  "info": {
+    "title": "xat-llm-engine",
+    "version": "unreleased"
+  },
+  "paths": {
+    "/v1/chat/completions": {
+      "post": {
+        "tags": [
+          "ChatCompletionsEndpoint"
+        ],
+        "summary": "Generates a chat answer, in one piece or as a stream.",
+        "description": "Set 'stream' to true to receive server-sent events (text/event-stream) instead of JSON. Swagger UI shows a stream only after it has finished.",
+        "requestBody": {
+          "description": "The chat request, in the format of the provider named in 'model'. A field that provider does not list returns a 400 error.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/JsonObject"
+              },
+              "example": {
+                "model": "local/ministral-3-3b",
+                "messages": [
+                  {
+                    "role": "user",
+                    "content": "Hello"
+                  }
+                ]
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatCompletionResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Payload Too Large",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Unsupported Media Type",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too Many Requests",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Bad Gateway",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/models": {
+      "get": {
+        "tags": [
+          "ModelsEndpoint"
+        ],
+        "summary": "Lists the configured models as provider/model.",
+        "responses": {
+          "200": {
+            "description": "The HTTP result.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelListResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/health": {
+      "get": {
+        "tags": [
+          "HealthEndpoints"
+        ],
+        "description": "Always 200. Read 'status' and 'providers' for the state of each provider.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/health/live": {
+      "get": {
+        "tags": [
+          "XatLlmEngine.Host"
+        ],
+        "description": "200 while the engine process runs.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LivenessResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/health/ready": {
+      "get": {
+        "tags": [
+          "HealthEndpoints"
+        ],
+        "description": "200 when the engine, or the provider in 'provider', can take requests. Otherwise 503.",
+        "parameters": [
+          {
+            "name": "provider",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "BudgetResponse": {
+        "required": [
+          "used",
+          "limit",
+          "period_hours"
+        ],
+        "type": "object",
+        "properties": {
+          "used": {
+            "type": "integer",
+            "description": "The tokens, input and output together, that the provider used in the rolling period before now.",
+            "format": "int64"
+          },
+          "limit": {
+            "type": "integer",
+            "description": "The token budget of the period.",
+            "format": "int64"
+          },
+          "period_hours": {
+            "type": "number",
+            "description": "The length of the rolling period, in hours.",
+            "format": "double"
+          },
+          "available_at": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "description": "Only when the state is `budget_exhausted`: the time when requests can continue.",
+            "format": "date-time"
+          }
+        },
+        "description": "The token budget use of one provider. See ADR 0011."
+      },
+      "ChatCompletionChoice": {
+        "required": [
+          "index",
+          "message",
+          "finish_reason"
+        ],
+        "type": "object",
+        "properties": {
+          "index": {
+            "type": "integer",
+            "description": "The answer's position, which is always 0.",
+            "format": "int32"
+          },
+          "message": {
+            "description": "The answer's message.",
+            "$ref": "#/components/schemas/ChatCompletionMessage"
+          },
+          "finish_reason": {
+            "type": "string",
+            "description": "Why generation stopped."
+          }
+        },
+        "description": "One complete answer."
+      },
+      "ChatCompletionMessage": {
+        "required": [
+          "role",
+          "content"
+        ],
+        "type": "object",
+        "properties": {
+          "role": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "description": "The author's role."
+          },
+          "content": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "description": "The text."
+          }
+        },
+        "description": "A message in a response. Both values are optional inside a stream."
+      },
+      "ChatCompletionResponse": {
+        "required": [
+          "id",
+          "object",
+          "created",
+          "model",
+          "choices",
+          "usage"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "A unique ID for this answer."
+          },
+          "object": {
+            "type": "string",
+            "description": "Always `chat.completion`."
+          },
+          "created": {
+            "type": "integer",
+            "description": "The creation time in Unix seconds.",
+            "format": "int64"
+          },
+          "model": {
+            "type": "string",
+            "description": "The full `provider/model` reference."
+          },
+          "choices": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ChatCompletionChoice"
+            },
+            "description": "The answers. There is always exactly one."
+          },
+          "usage": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "description": "Token counts, when the provider reported them.",
+                "$ref": "#/components/schemas/ChatCompletionUsage"
+              }
+            ]
+          }
+        },
+        "description": "A complete answer in the OpenAI format."
+      },
+      "ChatCompletionUsage": {
+        "required": [
+          "prompt_tokens",
+          "completion_tokens",
+          "total_tokens"
+        ],
+        "type": "object",
+        "properties": {
+          "prompt_tokens": {
+            "type": "integer",
+            "description": "Tokens in the prompt.",
+            "format": "int32"
+          },
+          "completion_tokens": {
+            "type": "integer",
+            "description": "Tokens generated.",
+            "format": "int32"
+          },
+          "total_tokens": {
+            "type": "integer",
+            "description": "The sum of both.",
+            "format": "int32"
+          }
+        },
+        "description": "Token counts in the OpenAI format."
+      },
+      "ErrorDetails": {
+        "required": [
+          "message",
+          "type"
+        ],
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string",
+            "description": "A description that is safe to show to the caller."
+          },
+          "type": {
+            "type": "string",
+            "description": "The error category."
+          }
+        },
+        "description": "The details of an error."
+      },
+      "ErrorResponse": {
+        "required": [
+          "error"
+        ],
+        "type": "object",
+        "properties": {
+          "error": {
+            "description": "The details.",
+            "$ref": "#/components/schemas/ErrorDetails"
+          }
+        },
+        "description": "An error in the OpenAI format, which OpenAI client libraries know how to read."
+      },
+      "HealthResponse": {
+        "required": [
+          "status",
+          "version",
+          "local",
+          "message",
+          "providers"
+        ],
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "description": "The overall health: `healthy`, `degraded` or `unhealthy`."
+          },
+          "version": {
+            "type": "string",
+            "description": "The engine version."
+          },
+          "local": {
+            "type": "string",
+            "description": "The local model's state, or `disabled`. This field is for older callers. Read Providers instead."
+          },
+          "message": {
+            "type": "string",
+            "description": "What the local model's state means. This field is for older callers."
+          },
+          "providers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProviderHealthResponse"
+            },
+            "description": "Each configured provider, enabled or not."
+          }
+        },
+        "description": "The body of `GET /health` and `GET /health/ready`. See ADR 0010."
+      },
+      "JsonObject": {
+        "type": "object"
+      },
+      "LivenessResponse": {
+        "required": [
+          "status"
+        ],
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "description": "Always `alive`."
+          }
+        },
+        "description": "The body of `GET /health/live`."
+      },
+      "ModelListResponse": {
+        "required": [
+          "object",
+          "data"
+        ],
+        "type": "object",
+        "properties": {
+          "object": {
+            "type": "string",
+            "description": "Always `list`."
+          },
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ModelResponse"
+            },
+            "description": "The models."
+          }
+        },
+        "description": "The model list in the OpenAI format."
+      },
+      "ModelResponse": {
+        "required": [
+          "id",
+          "object",
+          "owned_by"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "The value to send as `model`, written as `provider/model`."
+          },
+          "object": {
+            "type": "string",
+            "description": "Always `model`."
+          },
+          "owned_by": {
+            "type": "string",
+            "description": "The provider's name."
+          }
+        },
+        "description": "One model."
+      },
+      "ProviderHealthResponse": {
+        "required": [
+          "name",
+          "state",
+          "message"
+        ],
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "The provider's name, as callers write it before the `/` in a model name."
+          },
+          "state": {
+            "type": "string",
+            "description": "The provider's state, for example `ready`, `busy`, `starting` or `disabled`."
+          },
+          "message": {
+            "type": "string",
+            "description": "What the state means for callers."
+          },
+          "active": {
+            "type": [
+              "null",
+              "integer"
+            ],
+            "description": "The requests that have a slot. Only for a provider that queues requests in the engine.",
+            "format": "int32"
+          },
+          "queued": {
+            "type": [
+              "null",
+              "integer"
+            ],
+            "description": "The requests that wait for a slot.",
+            "format": "int32"
+          },
+          "capacity": {
+            "type": [
+              "null",
+              "integer"
+            ],
+            "description": "The number of slots.",
+            "format": "int32"
+          },
+          "queue_limit": {
+            "type": [
+              "null",
+              "integer"
+            ],
+            "description": "The number of requests that can wait.",
+            "format": "int32"
+          },
+          "budget": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "description": "The token budget use. Only for a provider that has a token budget.",
+                "$ref": "#/components/schemas/BudgetResponse"
+              }
+            ]
+          }
+        },
+        "description": "The health of one provider."
+      }
+    }
+  },
+  "tags": [
+    {
+      "name": "ChatCompletionsEndpoint"
+    },
+    {
+      "name": "ModelsEndpoint"
+    },
+    {
+      "name": "HealthEndpoints"
+    },
+    {
+      "name": "XatLlmEngine.Host"
+    }
+  ]
+}

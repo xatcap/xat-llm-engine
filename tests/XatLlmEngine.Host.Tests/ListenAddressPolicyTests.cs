@@ -19,6 +19,8 @@ public class ListenAddressPolicyTests
     [InlineData("urls", "http://LOCALHOST:8420")]
     [InlineData("urls", " http://127.0.0.1:8420 ; http://[::1]:8421 ")]
     [InlineData("urls", "http://unix:/tmp/xat-engine.sock")]
+    [InlineData("urls", "http://127.0.0.1:0")]
+    [InlineData("urls", "http://[::1]:0")]
     [InlineData("Kestrel:Endpoints:Main:Url", "")]
     public void EnsureAllowed_Loopback_Passes(string key, string value)
     {
@@ -46,6 +48,18 @@ public class ListenAddressPolicyTests
     public void EnsureAllowed_Network_Throws(string key, string value)
     {
         Assert.Throws<InvalidOperationException>(() => ListenAddressPolicy.EnsureAllowed(Configuration((key, value))));
+    }
+
+    /// <summary>Port 0 on the name localhost stops the engine with a clear message, because the server cannot use it.</summary>
+    /// <param name="value">The address.</param>
+    [Theory]
+    [InlineData("http://localhost:0")]
+    [InlineData("http://LOCALHOST:0")]
+    public void EnsureAllowed_DynamicPortOnLocalhost_Throws(string value)
+    {
+        var failure = Assert.Throws<InvalidOperationException>(() => ListenAddressPolicy.EnsureAllowed(Configuration(("urls", value))));
+
+        Assert.Contains("http://127.0.0.1:0", failure.Message, StringComparison.Ordinal);
     }
 
     /// <summary>Several Kestrel endpoints are all checked. One network address among them stops the engine.</summary>

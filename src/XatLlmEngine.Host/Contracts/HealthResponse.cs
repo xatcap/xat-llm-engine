@@ -16,7 +16,15 @@ internal sealed record HealthResponse(string Status, string Version, string Loca
 /// <param name="Queued">The requests that wait for a slot.</param>
 /// <param name="Capacity">The number of slots.</param>
 /// <param name="QueueLimit">The number of requests that can wait.</param>
-internal sealed record ProviderHealthResponse(string Name, string State, string Message, int? Active = null, int? Queued = null, int? Capacity = null, int? QueueLimit = null);
+/// <param name="Budget">The token budget use. Only for a provider that has a token budget.</param>
+internal sealed record ProviderHealthResponse(string Name, string State, string Message, int? Active = null, int? Queued = null, int? Capacity = null, int? QueueLimit = null, BudgetResponse? Budget = null);
+
+/// <summary>The token budget use of one provider. See ADR 0011.</summary>
+/// <param name="Used">The tokens, input and output together, that the provider used in the rolling period before now.</param>
+/// <param name="Limit">The token budget of the period.</param>
+/// <param name="PeriodHours">The length of the rolling period, in hours.</param>
+/// <param name="AvailableAt">Only when the state is <c>budget_exhausted</c>: the time when requests can continue.</param>
+internal sealed record BudgetResponse(long Used, long Limit, double PeriodHours, DateTimeOffset? AvailableAt = null);
 
 /// <summary>The body of <c>GET /health/live</c>.</summary>
 /// <param name="Status">Always <c>alive</c>.</param>

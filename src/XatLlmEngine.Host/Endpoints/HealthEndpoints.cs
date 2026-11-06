@@ -1,4 +1,3 @@
-using System.Reflection;
 using XatLlmEngine.Application.Abstractions;
 using XatLlmEngine.Application.Features.Health;
 using XatLlmEngine.Host.Contracts;
@@ -10,10 +9,6 @@ internal static class HealthEndpoints
 {
     /// <summary>The name of the local provider.</summary>
     private const string LocalName = "local";
-
-    /// <summary>The engine version, without the commit that the build adds after '+'.</summary>
-    private static readonly string Version =
-        (typeof(HealthEndpoints).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "0.0.0").Split('+')[0];
 
     /// <summary>Maps <c>/health</c>, <c>/health/live</c> and <c>/health/ready</c>.</summary>
     /// <param name="app">The application.</param>
@@ -59,7 +54,7 @@ internal static class HealthEndpoints
         var local = providers.FirstOrDefault(entry => entry.Name == LocalName);
         return new HealthResponse(
             ToWire(health.Overall),
-            Version,
+            EngineVersion.Value,
             local?.State ?? ToWire(ProviderState.Disabled),
             local?.Message ?? Describe(LocalName, ProviderState.Disabled),
             providers);
@@ -71,6 +66,7 @@ internal static class HealthEndpoints
     private static ProviderHealthResponse ToBody(ProviderHealth provider)
     {
         var load = provider.Status.Load;
+        var budget = provider.Budget is { } use ? new BudgetResponse(use.Used, use.Limit, use.Period.TotalHours, use.AvailableAt) : null;
         return new ProviderHealthResponse(
             provider.Name,
             ToWire(provider.Status.State),
@@ -78,7 +74,8 @@ internal static class HealthEndpoints
             load?.Active,
             load?.Queued,
             load?.Capacity,
-            load?.QueueLimit);
+            load?.QueueLimit,
+            budget);
     }
 
     /// <summary>Converts the overall health to its public value. These values are part of the API, so they never come from enum names.</summary>

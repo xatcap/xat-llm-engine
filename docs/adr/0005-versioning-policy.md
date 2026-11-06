@@ -6,7 +6,7 @@
 
 ## Context
 
-People start the engine by hand now. Later, other apps can start it and call its API. These callers must know when an update can break them.
+People start the engine by hand, and desktop apps include it and start it. These callers must know when an update can break them.
 
 Before this decision, the release notes came only from the GitHub pull request titles. No rule said which changes need a new major version. A tag could also start a release from a commit that failed its tests. The NuGet packages were not pinned, so two builds of the same commit could use different transitive packages.
 
@@ -37,6 +37,17 @@ The release workflow:
 3. Uses that section as the release notes.
 
 Each project has a `packages.lock.json` file. CI and the release restore in locked mode, so every NuGet package, transitive packages included, is pinned by its content hash.
+
+## Amendment (2026-11-06)
+
+Desktop apps now include the engine and start it. These apps need a stable contract and time to change their code.
+
+- **More contracts.** These items are also part of the contract, with the same rules for a breaking change:
+  - the fields of the ready file (`url`, `pid` and `version`), and
+  - the settings `Engine:ReadyFile` and `Engine:StopWhenInputCloses`.
+  A new field in the ready file is not breaking. Callers must accept fields that they do not know.
+- **Deprecation.** Before a removal, the engine marks an item as deprecated for at least one minor version. The CHANGELOG marks the item with **Deprecated**, and tells callers what to use in its place. The removal is then a breaking change in a later major version.
+- **The API document.** `docs/openapi.json` is the API document of the code. A test fails when the code and the file are different, so each change to the contract shows in review. Each release attaches the file with the release version.
 
 ## Consequences
 

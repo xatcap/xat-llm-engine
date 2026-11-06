@@ -150,6 +150,8 @@ jobs:
           # A link keeps the file in the cached folder, so the cache saved after this job is not empty.
           ln model-cache/Ministral-3-3B-Instruct-2512-Q4_K_M.gguf release/
           cp build/licenses/Ministral-LICENSE.txt release/
+      - name: Add the API document
+        run: python build/release.py openapi --version "${VERSION#v}" --output release
       - name: Check the size limit and write checksums
         run: python build/release.py finalize --folder release
       - name: Create the release

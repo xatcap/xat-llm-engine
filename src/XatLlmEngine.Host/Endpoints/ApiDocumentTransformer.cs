@@ -4,7 +4,7 @@ using Microsoft.OpenApi;
 
 namespace XatLlmEngine.Host.Endpoints;
 
-/// <summary>Completes the generated API document: its title and a working chat example.</summary>
+/// <summary>Completes the generated API document: its title, the engine version and a working chat example.</summary>
 internal sealed class ApiDocumentTransformer : IOpenApiDocumentTransformer
 {
     /// <summary>Describes the chat request body. Swagger UI puts the example into "Try it out", so the example must be a request that the API accepts.</summary>
@@ -28,6 +28,7 @@ internal sealed class ApiDocumentTransformer : IOpenApiDocumentTransformer
     public Task TransformAsync(OpenApiDocument document, OpenApiDocumentTransformerContext context, CancellationToken cancellationToken)
     {
         document.Info.Title = "xat-llm-engine";
+        document.Info.Version = EngineVersion.Value;
         DescribeChatRequest(document);
         return Task.CompletedTask;
     }

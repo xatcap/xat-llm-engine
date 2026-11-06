@@ -1,6 +1,34 @@
 # Operations
 
-This page tells how to watch the engine, how it handles failures of the local model, and how to find the cause of a problem.
+This page tells how to install the engine by hand, how to watch it, how it handles failures of the local model, and how to find the cause of a problem. To include the engine in an app, see [Include the engine in an app](embedding.md).
+
+## Install
+
+Download these two files from the same [GitHub release](https://github.com/xatcap/xat-llm-engine/releases):
+
+| File | Purpose |
+|---|---|
+| `xat-llm-engine-<version>-<platform>.tar.gz` (`.zip` on Windows) | The engine and llama.cpp. You do not need to install .NET. Platforms are `osx-arm64`, `linux-x64` and `win-x64`. |
+| `Ministral-3-3B-Instruct-2512-Q4_K_M.gguf` | The local model (2 GiB). |
+
+Then:
+
+1. Unpack the engine.
+2. Move the model file into its `models/` folder.
+3. Optionally, check both downloads against `SHA256SUMS` from the release.
+4. Start `XatLlmEngine.Host` (`XatLlmEngine.Host.exe` on Windows).
+
+The API starts at `http://127.0.0.1:8420`. The model takes a little while to load. `GET /health/ready?provider=local` returns 200 when it is ready.
+
+Without the model file, the engine still runs. `local` requests return 502 until you add the file and restart the engine.
+
+To use cloud providers, set the API key of each provider in an environment variable, for example `Providers__anthropic__ApiKey`. [Configuration](configuration.md#providers) lists the variables.
+
+### Platform notes
+
+- **macOS:** the programs have no signature, so macOS blocks a browser download. After you unpack the engine, remove the quarantine flag: `xattr -dr com.apple.quarantine xat-llm-engine-<version>-osx-arm64`
+- **Windows:** SmartScreen shows a warning at the first start, for the same reason.
+- **Linux and Windows:** the packages use the Vulkan build of llama.cpp. A machine without a usable GPU runs the model on the CPU.
 
 ## Monitor
 
@@ -46,7 +74,9 @@ The activity source `XatLlmEngine` gives one `chat` activity for each request. R
 
 - Only one engine can run per install. A second engine started from the same folder stops at once with a message, and the first engine continues to work. To run two engines, use two copies in different folders.
 - The engine keeps its own files in a data folder for each install: `xat-llm-engine/<hash>` inside the user's local application data folder. `Engine__DataFolder` sets another folder.
-- If the engine is killed, its `llama-server` continues to run until the next engine start. That start stops the `llama-server`, but only if the process name and start time still match the engine's PID file in the data folder.
+- On Windows, a killed engine also stops its `llama-server`, because both are in one job object.
+- On macOS and Linux, if the engine is killed, its `llama-server` continues to run until the next engine start. That start stops the `llama-server`, but only if the process name and start time still match the engine's PID file in the data folder. To stop both at once, send the signal to the engine's process group.
+- To stop the engine cleanly on every system, set `Engine__StopWhenInputCloses=true` and close the engine's standard input. See [Include the engine in an app](embedding.md#stop-the-engine).
 
 ## Local model failures and recovery
 
@@ -65,6 +95,14 @@ The activity source `XatLlmEngine` gives one `chat` activity for each request. R
 ## Token budget accuracy
 
 Requests that run at the same time can exceed a token budget, because each one can use up to its token limit. When a provider reports no tokens, the engine estimates them at 3 bytes for each token. The counts are in `usage.json` in the data folder. [ADR 0011](adr/0011-cost-control.md) describes the rules.
+
+## Privacy
+
+- The engine sends no telemetry.
+- The engine never downloads files. The model and llama.cpp come in the release.
+- The engine connects only to the cloud providers that have an API key, and only to send a caller's request.
+- The engine log never holds a prompt or an answer. There is one exception: the `Debug` level of `llama-server`'s own output can hold prompts. See [See the output of llama-server](#see-the-output-of-llama-server).
+- `usage.json` in the data folder holds only token counts for each provider and hour.
 
 ## Troubleshooting
 

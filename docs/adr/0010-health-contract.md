@@ -55,7 +55,26 @@ The health routes show provider names. The engine listens only on loopback (see 
 - `unhealthy` is a new overall value. A new state is not a breaking change (ADR 0005), so callers must accept values that they do not know.
 - `local` and `message` stay for older callers. They can go in a later major version.
 
+## Amendment (2026-11-06)
+
+An app must be able to warn its user before a provider uses its token budget. Before this amendment, the app saw only the `budget_exhausted` state, when requests already returned 429.
+
+- Each provider entry in `/health` and `/health/ready` gets a `budget` object when the provider has a token budget (ADR 0011). Entries of providers with no budget, such as `local`, have no `budget` object.
+- The object has these fields:
+
+  | Field | Meaning |
+  |---|---|
+  | `used` | The tokens that the provider used in the rolling period before now. |
+  | `limit` | The token budget of the period. |
+  | `period_hours` | The length of the rolling period, in hours. |
+  | `available_at` | Only when the state is `budget_exhausted`: the time when requests can continue. |
+
+- The object has no reset time, because the period is rolling. Old tokens leave the period one hour at a time.
+- The state and the object come from the same read of the counts, so they always agree.
+- The new fields are not a breaking change (ADR 0005).
+
 ## Alternatives considered
 
 - **Return 503 from `/health` when a provider fails:** rejected because a person must always read the body. Cloud providers can still work.
 - **Test each cloud provider in each health check:** rejected because each test costs a request, and it can count against a rate limit.
+- **A separate `/v1/usage` route for the budget:** rejected because `/health` already gives the state of each provider. `/v1` is the namespace of the OpenAI-compatible API.

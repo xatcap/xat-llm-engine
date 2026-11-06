@@ -17,13 +17,15 @@ It also lists `Urls` and `AllowedHosts`. ASP.NET has more listening settings, su
 
 | Environment variable | Purpose |
 |---|---|
-| `Engine__DataFolder` | The folder for the engine's own files: the instance lock, the PID file and the usage counts. Leave it empty for the default folder of this install. See [The data folder](operations.md#one-engine-for-each-install). |
+| `Engine__DataFolder` | The folder for the engine's own files: the instance lock, the PID file and the usage counts. Leave it empty for the default folder of this install. An app that includes the engine must set a folder that does not change after an update. See [The data folder](operations.md#one-engine-for-each-install). |
+| `Engine__ReadyFile` | The path of the ready file. When the API starts, the engine writes its address, its process ID and its version to this file. The engine deletes the file when it stops. Leave it empty for no file. A relative path starts at the engine's folder. The folder of the file must exist. See [Include the engine in an app](embedding.md). |
+| `Engine__StopWhenInputCloses` | Set to `true` to stop the engine when its standard input closes. The default is `false`. Do not set it when a service manager starts the engine, because the input can close at once. See [Include the engine in an app](embedding.md). |
 
 ## API and listening
 
 | Environment variable | Purpose |
 |---|---|
-| `Urls` | The listening address. It must be a loopback address. The default is `http://127.0.0.1:8420`. |
+| `Urls` | The listening address. It must be a loopback address. The default is `http://127.0.0.1:8420`. Use `http://127.0.0.1:0` to let the system choose a free port, and read the port from the ready file. The engine refuses `localhost` with port 0. |
 | `AllowedHosts` | The host names callers may use. The default allows only loopback names. |
 | `Api__StreamCommitSeconds` | How long a stream can wait for its first piece before the engine sends status 200 and keep-alive comments. 0 turns this off. The default is 15. |
 | `Api__MaxRequestBodyBytes` | The largest request body, in bytes. A larger body gets 413. The default is 20971520 (20 MiB). |
@@ -112,6 +114,8 @@ The engine checks every entry in `LocalModel` and `Providers` at startup, also a
 - An Anthropic provider with a `MaxTokensLimit` below 1.
 - A `MaxTokensLimit` above 0 when `RequestFields` has no `max_tokens` and no `max_completion_tokens`.
 - A value that is out of range or has the wrong format.
+- A listening address on the network, or `localhost` with port 0.
+- An `Engine:ReadyFile` path that is not valid, or that is in a folder that does not exist.
 
 ## Change the local model
 

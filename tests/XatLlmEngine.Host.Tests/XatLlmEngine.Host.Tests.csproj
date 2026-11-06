@@ -4,6 +4,8 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\src\XatLlmEngine.Host\XatLlmEngine.Host.csproj" />
+    <!-- The lifecycle tests start the real engine with this stand-in for llama-server. The alias keeps its Program type apart from the engine's. -->
+    <ProjectReference Include="..\XatLlmEngine.FakeLlamaServer\XatLlmEngine.FakeLlamaServer.csproj" Aliases="FakeLlamaServer" />
     <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" />
     <PackageReference Include="Microsoft.Extensions.TimeProvider.Testing" />
   </ItemGroup>

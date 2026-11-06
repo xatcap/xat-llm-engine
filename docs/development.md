@@ -13,6 +13,17 @@ Each project has a `packages.lock.json` file that pins its NuGet packages. CI re
 
 Each change that people can see needs an entry under `## [Unreleased]` in [CHANGELOG.md](../CHANGELOG.md).
 
+### Update the API document
+
+[docs/openapi.json](openapi.json) is the API document of the code. A test fails when the code and the file are different. After a change to the API, update the file, and then review the change:
+
+```bash
+UPDATE_OPENAPI=1 dotnet test --solution XatLlmEngine.slnx
+git diff docs/openapi.json
+```
+
+A change in this file is a change to the contract. [ADR 0005](adr/0005-versioning-policy.md) tells which changes are breaking.
+
 ## Architecture
 
 The code follows Clean Architecture, as described in [dotnet/clean-architecture.md](dotnet/clean-architecture.md). Decisions and their reasons are in [adr](adr). All text follows the rules in [writing-style.md](writing-style.md).
@@ -46,6 +57,8 @@ python3 build/release.py smoke-test --rid osx-arm64 \
   --model artifacts/cache/Ministral-3-3B-Instruct-2512-Q4_K_M.gguf
 ```
 
+The smoke test starts the engine as an app does. The system chooses the port, and the test reads it from the ready file. The test stops the engine when it closes the engine's input. Then it checks that the ready file and `llama-server` are gone.
+
 Set the `DOTNET` environment variable if `dotnet` on your `PATH` is not the right SDK.
 
 ## Make a release
@@ -62,7 +75,7 @@ Then the release workflow runs:
 2. It builds each platform package, and runs each one with the real model.
 3. It publishes only after every check passes and every file is on the release. The CHANGELOG section becomes the release notes.
 
-The workflow also runs `build/release.py finalize`. It checks that each file is under GitHub's 2 GiB limit, and it writes `SHA256SUMS`.
+The workflow also runs `build/release.py openapi`, which attaches `docs/openapi.json` with the release version. Then it runs `build/release.py finalize`. It checks that each file is under GitHub's 2 GiB limit, and it writes `SHA256SUMS`.
 
 To check the changelog section before you push the tag, run `python3 build/release.py check-changelog --version x.y.z`.
 

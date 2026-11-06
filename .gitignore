@@ -3,6 +3,7 @@ bin/
 obj/
 artifacts/
 TestResults/
+__pycache__/
 *.user
 .vs/
 .idea/

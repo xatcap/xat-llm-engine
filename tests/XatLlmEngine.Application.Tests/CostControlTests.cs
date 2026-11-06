@@ -153,6 +153,46 @@ public class CostControlTests
         Assert.Equal(OverallHealth.Unhealthy, health.Overall);
     }
 
+    /// <summary>The health of a provider under its budget gives the use, and no time, because requests can go ahead.</summary>
+    [Fact]
+    public void Budget_UnderLimit_HealthGivesUse()
+    {
+        var ledger = new MemoryLedger();
+        ledger.Record("cloud", 3, DateTimeOffset.UtcNow);
+        var provider = new FakeChatProvider("cloud") { Budget = new TokenBudget(5, TimeSpan.FromHours(2)) };
+
+        var health = new GetHealthHandler(new ProviderRegistry([provider]), new NoDisabled(), ledger).Handle(stopping: false).Providers.Single();
+
+        Assert.Equal(ProviderState.Ready, health.Status.State);
+        Assert.Equal(new BudgetUse(3, 5, TimeSpan.FromHours(2), AvailableAt: null), health.Budget);
+    }
+
+    /// <summary>The health of a provider that has used its budget gives the time when requests can continue.</summary>
+    [Fact]
+    public void Budget_UsedUp_HealthGivesAvailableTime()
+    {
+        var time = new FakeTimeProvider(DateTimeOffset.Parse("2026-11-06T10:00:00Z", System.Globalization.CultureInfo.InvariantCulture));
+        var ledger = new MemoryLedger();
+        ledger.Record("cloud", 5, time.GetUtcNow());
+        var provider = new FakeChatProvider("cloud") { Budget = new TokenBudget(5, TimeSpan.FromHours(1)) };
+
+        var health = new GetHealthHandler(new ProviderRegistry([provider]), new NoDisabled(), ledger, time).Handle(stopping: false).Providers.Single();
+
+        Assert.True(health.Budget!.IsExhausted);
+        Assert.Equal(time.GetUtcNow().AddHours(1), health.Budget.AvailableAt);
+    }
+
+    /// <summary>A provider with no budget has no budget data in its health.</summary>
+    [Fact]
+    public void Budget_None_HealthHasNoUse()
+    {
+        var provider = new FakeChatProvider("cloud");
+
+        var health = new GetHealthHandler(new ProviderRegistry([provider]), new NoDisabled(), new MemoryLedger()).Handle(stopping: false).Providers.Single();
+
+        Assert.Null(health.Budget);
+    }
+
     /// <summary>The caller gets the token counts of an OpenAI-style stream only when it asked for them. Other protocols always send them.</summary>
     /// <param name="fields">The template, separated by ','.</param>
     /// <param name="askUsage">Whether the caller sets stream_options.include_usage.</param>

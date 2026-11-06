@@ -77,6 +77,11 @@ internal sealed partial class LlamaServerProcess : IDisposable
     public void Start()
     {
         process.Start();
+        if (!ChildProcessJob.TryAdd(process, out var error))
+        {
+            LogJobRefused(error);
+        }
+
         process.BeginOutputReadLine();
         process.BeginErrorReadLine();
     }
@@ -175,4 +180,9 @@ internal sealed partial class LlamaServerProcess : IDisposable
     /// <param name="timeout">The wait.</param>
     [LoggerMessage(Level = LogLevel.Warning, Message = "llama-server did not exit within {Timeout} after the engine stopped it.")]
     private partial void LogStopSlow(TimeSpan timeout);
+
+    /// <summary>Logs that Windows did not put llama-server in the engine's job.</summary>
+    /// <param name="error">The Windows error code.</param>
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Windows did not put llama-server in the engine's job (error {Error}). If the engine is killed, llama-server continues to run until the next engine start.")]
+    private partial void LogJobRefused(int error);
 }

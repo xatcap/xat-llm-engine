@@ -8,6 +8,16 @@ The release workflow uses the section of each version as its release notes. Writ
 
 ### Added
 
+- Support for apps that include the engine. See `docs/embedding.md`.
+  - `Engine:ReadyFile`. When the API starts, the engine writes its address, its process ID and its version to this file. It deletes the file when it stops, and removes an old file when it starts. A folder that does not exist stops the engine at startup.
+  - `Engine:StopWhenInputCloses` (default `false`). The engine stops when its standard input closes, also when the parent app stops unexpectedly.
+  - `Urls=http://127.0.0.1:0` lets the system choose a free port. The engine refuses `localhost` with port 0, because the server cannot use it.
+  - On Windows, a killed engine also stops its `llama-server`.
+  - The engine logs a warning when `Engine:DataFolder` is empty, because an app update to a new folder then starts the token budgets again from zero.
+- `/health` gives a `budget` object for each provider with a token budget: `used`, `limit`, `period_hours`, and `available_at` when the budget is used up.
+- `docs/openapi.json` is the API document of the code, and each release attaches it with the release version. A test fails when the code and the file are different.
+- A deprecation rule: a deprecated item stays for at least one minor version before a removal. See ADR 0005.
+- A privacy section in `docs/operations.md`.
 - Each package has a `licenses/` folder with the full license and notice texts of each third-party component. This includes the libraries inside llama.cpp and the .NET runtime. The release stops when a text is missing.
 - `Api:StreamCommitSeconds` (default 15). When a stream waits longer for its first piece, the engine sends status 200. It then sends a `: keep-alive` comment every 15 seconds. These comments stop the caller's read time limit from ending.
 - `Providers:<name>:TokenBudget` and `BudgetPeriodHours`. A provider that has used its budget in the rolling period gets 429 with the type `budget_exceeded_error`, and `/health` reports `budget_exhausted`. The counts survive a restart.

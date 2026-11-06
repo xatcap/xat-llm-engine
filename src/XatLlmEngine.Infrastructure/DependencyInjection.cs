@@ -48,7 +48,7 @@ public static class DependencyInjection
         return services;
     }
 
-    /// <summary>Adds the data folder and the lock that allows only one engine for each install folder.</summary>
+    /// <summary>Adds the engine settings, the data folder and the lock that allows only one engine for each install folder.</summary>
     /// <param name="services">The service collection to add to.</param>
     /// <param name="configuration">The application configuration.</param>
     /// <exception cref="InvalidOperationException">The engine settings are invalid.</exception>
@@ -56,17 +56,54 @@ public static class DependencyInjection
     {
         var problems = new List<string>();
         var options = SettingsRules.Bind<EngineOptions>(configuration.GetSection(EngineOptions.SectionName), problems);
+        var readyFile = ResolveReadyFile(options.ReadyFile, problems);
         SettingsRules.ThrowIfAny($"'{EngineOptions.SectionName}'", problems);
 
         var dataFolder = string.IsNullOrWhiteSpace(options.DataFolder)
             ? EngineDataFolder.ForThisInstall()
             : new EngineDataFolder(LlamaServerPaths.FromEngineFolder(options.DataFolder));
         services.AddSingleton(dataFolder);
+
+        // One validated object is the only source of these settings. The ready file path is absolute, so the Host does not resolve it again.
+        services.AddSingleton(Options.Create(new EngineOptions
+        {
+            DataFolder = options.DataFolder,
+            ReadyFile = readyFile,
+            StopWhenInputCloses = options.StopWhenInputCloses,
+        }));
         services.AddSingleton<EngineInstanceLock>();
         services.AddHostedService(provider => provider.GetRequiredService<EngineInstanceLock>());
         services.AddSingleton<JsonUsageLedger>();
         services.AddSingleton<IUsageLedger>(provider => provider.GetRequiredService<JsonUsageLedger>());
         services.AddHostedService(provider => provider.GetRequiredService<JsonUsageLedger>());
+    }
+
+    /// <summary>Resolves the path of the ready file. A path that cannot work stops the engine at startup, before the model loads.</summary>
+    /// <param name="setting">The configured path.</param>
+    /// <param name="problems">Receives each problem.</param>
+    /// <returns>The absolute path, or an empty value when the setting is off.</returns>
+    private static string ResolveReadyFile(string setting, List<string> problems)
+    {
+        if (string.IsNullOrWhiteSpace(setting))
+        {
+            return string.Empty;
+        }
+
+        try
+        {
+            var path = LlamaServerPaths.FromEngineFolder(setting);
+            if (!Directory.Exists(Path.GetDirectoryName(path)))
+            {
+                problems.Add($"The folder of the ready file '{path}' does not exist. Create the folder before the engine starts.");
+            }
+
+            return path;
+        }
+        catch (Exception exception) when (exception is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            problems.Add($"The path of the ready file '{setting}' is not valid: {exception.Message}");
+            return string.Empty;
+        }
     }
 
     /// <summary>Adds the supervised llama-server, unless the settings turn off the local model.</summary>

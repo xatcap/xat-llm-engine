@@ -95,6 +95,60 @@ public class ApiDocumentationTests
         Assert.Equal(HttpStatusCode.BadGateway, response.StatusCode);
     }
 
+    /// <summary>
+    /// The committed document <c>docs/openapi.json</c> is the same as the document of the code. Then each change of the contract
+    /// shows in review, and the release attaches a correct file. To update the file, run the tests with <c>UPDATE_OPENAPI=1</c>.
+    /// </summary>
+    /// <returns>A task for the test.</returns>
+    [Fact]
+    public async Task Document_MatchesCommittedSnapshot()
+    {
+        await using var engine = EngineIn("Development");
+        using var client = engine.CreateClient();
+        var text = await client.GetStringAsync(new Uri("/openapi/v1.json", UriKind.Relative), TestContext.Current.CancellationToken);
+        var actual = Normalize(text);
+        var path = Path.Combine(RepositoryRoot(), "docs", "openapi.json");
+
+        if (Environment.GetEnvironmentVariable("UPDATE_OPENAPI") == "1")
+        {
+            await File.WriteAllTextAsync(path, actual, TestContext.Current.CancellationToken);
+        }
+
+        Assert.True(File.Exists(path), "docs/openapi.json is missing. Run the tests with UPDATE_OPENAPI=1 to make it.");
+        var expected = Normalize(await File.ReadAllTextAsync(path, TestContext.Current.CancellationToken));
+        Assert.True(expected == actual, "docs/openapi.json is not the same as the API of the code. Run the tests with UPDATE_OPENAPI=1, and review the change.");
+    }
+
+    /// <summary>Writes a document in one fixed form, so that only real changes count.</summary>
+    /// <param name="text">The document.</param>
+    /// <returns>The document, indented, with a final new line.</returns>
+    private static string Normalize(string text)
+    {
+        var node = System.Text.Json.Nodes.JsonNode.Parse(text)!.AsObject();
+
+        // The server address depends on the test host, not on the API. The release script writes the release version into the
+        // file that it attaches to the release, so the committed file does not change for each version.
+        node.Remove("servers");
+        node["info"]!["version"] = "unreleased";
+        var options = new JsonSerializerOptions { WriteIndented = true, Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
+        return node.ToJsonString(options).ReplaceLineEndings("\n") + "\n";
+    }
+
+    /// <summary>Finds the folder of the repository, which holds the solution file.</summary>
+    /// <returns>The folder.</returns>
+    private static string RepositoryRoot()
+    {
+        for (var folder = new DirectoryInfo(AppContext.BaseDirectory); folder is not null; folder = folder.Parent)
+        {
+            if (File.Exists(Path.Combine(folder.FullName, "XatLlmEngine.slnx")))
+            {
+                return folder.FullName;
+            }
+        }
+
+        throw new InvalidOperationException("The tests cannot find the repository folder.");
+    }
+
     /// <summary>Hosts the engine in one environment.</summary>
     /// <param name="environment">The environment name.</param>
     /// <returns>The hosted engine.</returns>

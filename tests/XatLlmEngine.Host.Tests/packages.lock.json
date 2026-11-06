@@ -175,6 +175,9 @@
       "xatllmengine.domain": {
         "type": "Project"
       },
+      "xatllmengine.fakellamaserver": {
+        "type": "Project"
+      },
       "xatllmengine.host": {
         "type": "Project",
         "dependencies": {

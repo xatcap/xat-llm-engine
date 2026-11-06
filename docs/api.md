@@ -1,6 +1,46 @@
 # API reference
 
-This page is for programs that call the engine. The engine listens at `http://127.0.0.1:8420` by default. The [README](../README.md#quick-start) has examples of requests.
+This page is for programs that call the engine. The engine listens at `http://127.0.0.1:8420` by default. An app that includes the engine can let the system choose the port. See [Include the engine in an app](embedding.md). The [README](../README.md#quick-start) has an example request.
+
+## How it works
+
+- Callers send plain HTTP requests, or use a client library.
+- The model name selects the provider, for example `local/ministral-3-3b` or `anthropic/claude-sonnet-5-5`.
+- Each provider has its own request template, in that provider's native format. See [Request templates](#request-templates).
+- Every provider returns the same OpenAI-style response format, the same errors and the same health values.
+- Local requests go to a [llama.cpp](https://github.com/ggml-org/llama.cpp) `llama-server` process. The engine starts and supervises this process.
+- Cloud requests go directly to the vendor's API.
+
+### Client libraries
+
+OpenAI client libraries work for these OpenAI-format providers:
+
+- `local`
+- `openai`
+- `mistral`
+
+They do not work for `anthropic/...`, which uses Anthropic's own format. Send Anthropic requests as plain HTTP:
+
+```bash
+curl http://127.0.0.1:8420/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{"model":"anthropic/claude-sonnet-5-5","system":"Answer in one sentence.","max_tokens":256,"messages":[{"role":"user","content":"Hello"}]}'
+```
+
+This example streams an answer from the local model with the OpenAI client library for Python:
+
+```python
+from openai import OpenAI
+
+client = OpenAI(base_url="http://127.0.0.1:8420/v1", api_key="unused-on-loopback")
+for chunk in client.chat.completions.create(
+    model="local/ministral-3-3b",
+    messages=[{"role": "user", "content": "Hello"}],
+    stream=True,
+):
+    if chunk.choices and chunk.choices[0].delta.content:
+        print(chunk.choices[0].delta.content, end="")
+```
 
 ## Routes
 
@@ -8,11 +48,11 @@ This page is for programs that call the engine. The engine listens at `http://12
 |---|---|
 | `POST /v1/chat/completions` | Chat, with or without streaming. The accepted fields depend on the provider. See [Request templates](#request-templates). |
 | `GET /v1/models` | Lists the configured models as `provider/model`. |
-| `GET /health` | Always 200. Returns `status` (`healthy`, `degraded` or `unhealthy`), `version`, and `providers`: the `name`, `state` and `message` of each configured provider. For `local`, it also returns `active`, `queued`, `capacity` and `queue_limit`. The older fields `local` and `message` describe the local model. |
+| `GET /health` | Always 200. Returns `status` (`healthy`, `degraded` or `unhealthy`), `version`, and `providers`: the `name`, `state` and `message` of each configured provider. For `local`, it also returns `active`, `queued`, `capacity` and `queue_limit`. For a provider with a token budget, it also returns `budget`. The older fields `local` and `message` describe the local model. |
 | `GET /health/live` | 200 while the engine runs. |
 | `GET /health/ready` | 200 when at least one provider can take requests, otherwise 503. Add `?provider=local` to ask about one provider. |
 | `GET /swagger` | Swagger UI. Development only. See [Debug with Swagger](development.md#debug-with-swagger). |
-| `GET /openapi/v1.json` | The OpenAPI document. Development only. |
+| `GET /openapi/v1.json` | The OpenAPI document. Development only. The same document is in [openapi.json](openapi.json), and each release attaches it. |
 
 ## Request templates
 
@@ -107,7 +147,33 @@ The provider states are:
 - `disabled`
 - `budget_exhausted`
 
+A provider with a token budget also has a `budget` object:
+
+```json
+{"name":"anthropic","state":"ready","message":"...","budget":{"used":12345,"limit":100000,"period_hours":24}}
+```
+
+- `used` is the number of tokens, input and output together, in the rolling period before now.
+- `limit` is the token budget of the period.
+- `period_hours` is the length of the period.
+- `available_at` is present only when the state is `budget_exhausted`. It is the time when requests can continue.
+
+Use `budget` to warn your users before the budget is used up.
+
 A provider can take requests only when it is `ready` or `busy`. The engine does not test cloud providers. So an enabled cloud provider is `ready`. Accept values that you do not know. A later version can add values. [ADR 0010](adr/0010-health-contract.md) describes the health contract.
+
+## Compatibility
+
+The engine follows Semantic Versioning. These items are part of the contract:
+
+- the routes,
+- the request and response fields,
+- the status codes and error types,
+- the health values,
+- the settings, and
+- the fields of the ready file.
+
+A breaking change to one of these needs a new major version. Before a removal, the engine marks the item as deprecated for at least one minor version, and the [CHANGELOG](../CHANGELOG.md) tells what to use in its place. Accept fields and values that you do not know, because a minor version can add them. [ADR 0005](adr/0005-versioning-policy.md) describes the rules.
 
 ## Supported models
 

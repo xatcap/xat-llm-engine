@@ -589,11 +589,37 @@ public class ApiTests
 
             Assert.Equal(HttpStatusCode.TooManyRequests, afterRestart.StatusCode);
             Assert.Equal(HttpStatusCode.ServiceUnavailable, health.StatusCode);
+            using var healthBody = await ReadJsonAsync(health);
+            var fake = healthBody.RootElement.GetProperty("providers").EnumerateArray().Single(entry => entry.GetProperty("name").GetString() == "fake");
+            Assert.Equal("budget_exhausted", fake.GetProperty("state").GetString());
+            Assert.True(fake.GetProperty("budget").GetProperty("available_at").GetDateTimeOffset() > DateTimeOffset.UtcNow.AddHours(23));
         }
         finally
         {
             Directory.Delete(folder, recursive: true);
         }
+    }
+
+    /// <summary>The health route gives the budget use of a provider with a budget, in snake_case, and no budget object for the local model.</summary>
+    /// <returns>A task for the test.</returns>
+    [Fact]
+    public async Task Health_ProviderWithBudget_GivesUse()
+    {
+        await using var engine = new EngineFactory();
+        engine.Provider.Budget = new TokenBudget(100, TimeSpan.FromHours(24));
+        using var answered = await PostAsync(engine, ValidBody);
+        using var client = engine.CreateClient();
+
+        using var response = await client.GetAsync(new Uri("/health", UriKind.Relative), TestContext.Current.CancellationToken);
+
+        using var body = await ReadJsonAsync(response);
+        var providers = body.RootElement.GetProperty("providers").EnumerateArray().ToList();
+        var budget = providers.Single(entry => entry.GetProperty("name").GetString() == "fake").GetProperty("budget");
+        Assert.Equal(5, budget.GetProperty("used").GetInt64());
+        Assert.Equal(100, budget.GetProperty("limit").GetInt64());
+        Assert.Equal(24, budget.GetProperty("period_hours").GetDouble());
+        Assert.False(budget.TryGetProperty("available_at", out _));
+        Assert.False(providers.Single(entry => entry.GetProperty("name").GetString() == "local").TryGetProperty("budget", out _));
     }
 
     /// <summary>Posts a chat request.</summary>

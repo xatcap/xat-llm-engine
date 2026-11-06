@@ -204,10 +204,7 @@ internal sealed partial class JsonUsageLedger : IUsageLedger, IHostedService
     {
         try
         {
-            var path = dataFolder.File(FileName);
-            var temporary = path + ".tmp";
-            File.WriteAllText(temporary, text);
-            File.Move(temporary, path, overwrite: true);
+            AtomicFile.WriteAllText(dataFolder.File(FileName), text);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {

@@ -2,6 +2,8 @@
   <PropertyGroup>
     <!-- 'dotnet publish' of the Host gives its runtime to this project too, so the lock file must pin the packages of each release platform. -->
     <RuntimeIdentifiers>osx-arm64;linux-x64;win-x64</RuntimeIdentifiers>
+    <!-- The generated code of the Windows job object calls (LibraryImport) needs this. -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\XatLlmEngine.Application\XatLlmEngine.Application.csproj" />

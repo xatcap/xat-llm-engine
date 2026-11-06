@@ -7,52 +7,47 @@
 
 # xat-llm-engine
 
-LLM bridge for local or cloud models. It gives other programs one HTTP API for a bundled local model and for cloud providers such as Anthropic, OpenAI and Mistral.
+An LLM engine that you put inside your desktop app. It gives your app one local API for a bundled offline model and for cloud models, with strict contracts and cost limits.
 
-## How it works
+## Who it is for
 
-- Other programs call the engine's API. They use plain HTTP or a client library.
-- The model name selects the provider: `local/ministral-3-3b` or `anthropic/claude-sonnet-5-5`.
-- Each provider has its own request template, in that provider's native format. Send only the fields that provider lists. See [Request templates](#request-templates).
-- OpenAI client libraries work for these OpenAI-format providers:
-  - `local`
-  - `openai`
-  - `mistral`
+The engine is for developers of desktop apps who want these things:
 
-  They do not work for `anthropic/...`, which uses Anthropic's own format.
-- Every provider returns the same OpenAI-style response format.
-- Local requests go to a [llama.cpp](https://github.com/ggml-org/llama.cpp) `llama-server` process, which the engine starts and supervises.
-- Cloud requests go directly to the vendor's API.
+- AI features that work offline by default, with a small local model.
+- Cloud models from Anthropic, OpenAI or Mistral when the app needs more, with a hard limit on the cost.
+- No extra installation for the users of the app. The engine and the model go inside the app's installer.
 
-## Install
+## Why use it
 
-Download these two files from the same [GitHub release](https://github.com/xatcap/xat-llm-engine/releases):
+- **It goes inside your app.** One folder with no runtime to install. Your app starts it, finds its address, and stops it.
+- **It works offline first.** The local model runs on the user's machine. The engine sends no telemetry and never downloads files.
+- **It limits the cost of cloud models.** The engine never retries a request. Each provider can have a token limit for each request, and a token budget for a period such as one day. Your app can read how much of the budget is left.
+- **It fails in a predictable way.** Each kind of failure has one status code and one error type. The health values are stable, so your app can show the right message.
+- **It does not break your app on an update.** The engine follows Semantic Versioning, and each release has its API document.
 
-| File | Purpose |
+## What it is not
+
+- It is not a model library. It runs one local model at a time.
+- It is not a hosted gateway or a team server. It accepts requests only from programs on the same machine.
+- It does not do tool calling, embeddings, images or audio.
+
+## How it compares
+
+These tools are good at different jobs:
+
+| Choose | When you want |
 |---|---|
-| `xat-llm-engine-<version>-<platform>.tar.gz` (`.zip` on Windows) | The engine and llama.cpp. You do not need to install .NET. Platforms are `osx-arm64`, `linux-x64` and `win-x64`. |
-| `Ministral-3-3B-Instruct-2512-Q4_K_M.gguf` | The local model (2 GiB). |
-
-Then:
-
-1. Unpack the engine.
-2. Move the model file into its `models/` folder.
-3. Optionally, check both downloads against `SHA256SUMS` from the release.
-4. Start `XatLlmEngine.Host` (`XatLlmEngine.Host.exe` on Windows).
-
-The API starts at `http://127.0.0.1:8420`. The model takes a little while to load. `GET /health/ready?provider=local` returns 200 when it is ready.
-
-Without the model file, the engine still runs. `local` requests return 502 until you add the file and restart the engine.
-
-### Platform notes
-
-- **macOS:** the programs have no signature, so macOS blocks a browser download. After you unpack the engine, remove the quarantine flag: `xattr -dr com.apple.quarantine xat-llm-engine-<version>-osx-arm64`
-- **Windows:** SmartScreen shows a warning at the first start, for the same reason.
-- **Linux and Windows:** the packages use the Vulkan build of llama.cpp. A machine without a usable GPU runs the model on the CPU.
+| [Ollama](https://ollama.com) | Many local models, which the user installs and manages in a separate app. |
+| [LiteLLM](https://github.com/BerriAI/litellm) | A gateway to many providers, for a team or a server. |
+| [OpenRouter](https://openrouter.ai) | One hosted API to many cloud models. |
+| xat-llm-engine | One local model and a few cloud providers inside your own desktop app, with strict contracts and cost limits. |
 
 ## Quick start
 
-Send a request to the local model with `curl`:
+1. Download the engine package for your platform and the model file from the same [GitHub release](https://github.com/xatcap/xat-llm-engine/releases).
+2. Unpack the engine, and move the model file into its `models/` folder.
+3. Start `XatLlmEngine.Host` (`XatLlmEngine.Host.exe` on Windows).
+4. Send a request:
 
 ```bash
 curl http://127.0.0.1:8420/v1/chat/completions \
@@ -60,81 +55,35 @@ curl http://127.0.0.1:8420/v1/chat/completions \
   -d '{"model":"local/ministral-3-3b","messages":[{"role":"user","content":"Hello"}]}'
 ```
 
-Or stream the answer with the OpenAI client library for Python:
+The model takes a little while to load. [Install](docs/operations.md#install) has the full steps and the notes for macOS, Windows and Linux.
 
-```python
-from openai import OpenAI
+## Put it in your app
 
-client = OpenAI(base_url="http://127.0.0.1:8420/v1", api_key="unused-on-loopback")
-for chunk in client.chat.completions.create(
-    model="local/ministral-3-3b",
-    messages=[{"role": "user", "content": "Hello"}],
-    stream=True,
-):
-    if chunk.choices and chunk.choices[0].delta.content:
-        print(chunk.choices[0].delta.content, end="")
-```
+[Include the engine in an app](docs/embedding.md) tells how your app can start the engine on a free port, read its address, and stop it. It also tells how to sign the files and where to keep the engine's data.
 
-Anthropic uses its own format, so this request sends `system` and `max_tokens` as top-level fields:
+## Cloud providers
 
-```bash
-curl http://127.0.0.1:8420/v1/chat/completions \
-  -H "Content-Type: application/json" \
-  -d '{"model":"anthropic/claude-sonnet-5-5","system":"Answer in one sentence.","max_tokens":256,"messages":[{"role":"user","content":"Hello"}]}'
-```
+Set the API key of a provider in an environment variable, for example `Providers__anthropic__ApiKey`. Then send requests to a model such as `anthropic/claude-sonnet-5-5`. Each provider uses its own request format, and every provider gives the same response format. See the [API reference](docs/api.md).
 
-`GET /v1/models` lists the configured models. The [API reference](docs/api.md) lists all routes, the error codes, the stream rules and the health values.
+## Privacy
 
-## Request templates
-
-Each provider accepts only the fields in its template, and any other field returns a 400 error. The [request templates](docs/api.md#request-templates) list the fields of each provider and the values that the engine adds.
-
-## Enable cloud providers
-
-Set the API key of each cloud provider that you want to use:
-
-| Environment variable | Provider |
-|---|---|
-| `Providers__anthropic__ApiKey` | Anthropic |
-| `Providers__openai__ApiKey` | OpenAI |
-| `Providers__mistral__ApiKey` | Mistral's cloud API |
-
-**Keep API keys in environment variables, never in a file in source control.**
-
-All other settings are in `appsettings.json`, next to the program. An environment variable can override each setting. Use `__` between the levels, for example `LocalModel__ContextSize`. The [configuration reference](docs/configuration.md) lists each setting, and tells how to add another provider.
-
-## What the engine does not do
-
-- The engine does not support these features on any provider:
-  - Tool calling.
-  - Embeddings and reranking.
-  - Image generation.
-  - Speech and audio.
-- Only programs on the same machine can connect. The API has no authentication, so the engine refuses to start on a network address.
-
-[Supported models](docs/api.md#supported-models) gives more details.
+The engine sends no telemetry. At the default log level, its logs never hold prompts or answers. See [Privacy](docs/operations.md#privacy).
 
 ## Documentation
 
 | Page | What it covers |
 |---|---|
-| [API reference](docs/api.md) | Routes, request templates, content rules, streams, errors, health and supported models. |
-| [Configuration](docs/configuration.md) | Each setting, how to add a provider, startup checks and how to change the local model. |
-| [Operations](docs/operations.md) | Logs, metrics and traces, the data folder, how the engine handles local failures, and troubleshooting. |
-| [Development](docs/development.md) | Build, test, project layout, Swagger, local packages and releases. |
+| [Include the engine in an app](docs/embedding.md) | Start, find, stop and ship the engine inside a desktop app. |
+| [API reference](docs/api.md) | Routes, request templates, streams, errors, health and compatibility. |
+| [Configuration](docs/configuration.md) | Each setting, how to add a provider, and how to change the local model. |
+| [Operations](docs/operations.md) | Install by hand, logs, metrics, privacy, local failures and troubleshooting. |
+| [Development](docs/development.md) | Build, test, project layout and releases. |
 | [Architecture decisions](docs/adr) | The significant decisions and their reasons. |
 | [CHANGELOG.md](CHANGELOG.md) | The changes in each release. |
 
 ## Develop
 
-This needs the .NET SDK version in `global.json`, and Python 3.12 or newer for the release script.
-
-```bash
-dotnet build XatLlmEngine.slnx
-dotnet test --solution XatLlmEngine.slnx
-```
-
-The [development guide](docs/development.md) tells how to update lock files, debug with Swagger, build a package and make a release. All text follows the rules in [docs/writing-style.md](docs/writing-style.md).
+Build and test commands are in the [development guide](docs/development.md#build-and-test). All text follows the rules in [docs/writing-style.md](docs/writing-style.md).
 
 ## License
 

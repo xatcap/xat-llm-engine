@@ -19,7 +19,8 @@ public enum OverallHealth
 /// <summary>The health of one provider.</summary>
 /// <param name="Name">The provider's name.</param>
 /// <param name="Status">The provider's status.</param>
-public sealed record ProviderHealth(string Name, ProviderStatus Status);
+/// <param name="Budget">The token budget use, or <see langword="null"/> when no budget applies to the provider.</param>
+public sealed record ProviderHealth(string Name, ProviderStatus Status, BudgetUse? Budget = null);
 
 /// <summary>The health of the engine and of each provider.</summary>
 /// <param name="Overall">The overall health.</param>
@@ -41,23 +42,25 @@ public sealed class GetHealthHandler(ProviderRegistry providers, IDisabledProvid
     /// <returns>The health.</returns>
     public EngineHealth Handle(bool stopping)
     {
-        var enabled = providers.All.Select(provider => new ProviderHealth(provider.Name, StatusOf(provider, stopping))).ToList();
+        var enabled = providers.All.Select(provider => HealthOf(provider, stopping)).ToList();
         var serving = enabled.Count(provider => provider.Status.IsServing);
         var overall = serving == 0 ? OverallHealth.Unhealthy : serving == enabled.Count ? OverallHealth.Healthy : OverallHealth.Degraded;
         var off = disabled.Names.Select(name => new ProviderHealth(name, new ProviderStatus(ProviderState.Disabled)));
         return new EngineHealth(overall, [.. enabled, .. off]);
     }
 
-    /// <summary>Gives the status of one enabled provider. A provider that has used its budget cannot take requests.</summary>
+    /// <summary>Gives the health of one enabled provider. A provider that has used its budget cannot take requests.</summary>
     /// <param name="provider">The provider.</param>
     /// <param name="stopping">Whether the engine is stopping.</param>
-    /// <returns>The status.</returns>
-    private ProviderStatus StatusOf(IChatProvider provider, bool stopping)
+    /// <returns>The health.</returns>
+    private ProviderHealth HealthOf(IChatProvider provider, bool stopping)
     {
         var status = provider.Status;
-        return stopping ? new ProviderStatus(ProviderState.Stopping, status.Load)
-            : status.IsServing && budget.IsExhausted(provider) ? status with { State = ProviderState.BudgetExhausted }
+        var use = budget.Usage(provider);
+        status = stopping ? new ProviderStatus(ProviderState.Stopping, status.Load)
+            : status.IsServing && use is { IsExhausted: true } ? status with { State = ProviderState.BudgetExhausted }
             : status;
+        return new ProviderHealth(provider.Name, status, use);
     }
 
     /// <summary>Tells whether the engine, or one provider, can take requests.</summary>

@@ -16,4 +16,5 @@ namespace XatLlmEngine.Host.Contracts;
 [JsonSerializable(typeof(ModelListResponse))]
 [JsonSerializable(typeof(HealthResponse))]
 [JsonSerializable(typeof(LivenessResponse))]
+[JsonSerializable(typeof(ReadyFile))]
 internal sealed partial class HostJson : JsonSerializerContext;
