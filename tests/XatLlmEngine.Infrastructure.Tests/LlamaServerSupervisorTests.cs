@@ -39,6 +39,103 @@ public sealed class LlamaServerSupervisorTests : IDisposable
         Assert.Equal(["--threads", "2"], arguments.TakeLast(2));
     }
 
+    /// <summary>A context size in the extra arguments replaces the setting, so llama-server gets the flag one time only.</summary>
+    [Fact]
+    public void BuildArguments_ExtraContextSize_ReplacesSetting()
+    {
+        var arguments = LlamaServerSupervisor.BuildArguments(new LlamaCppOptions { ContextSize = 2048, ExtraArguments = ["-c", "4096"] }, 1234);
+
+        Assert.DoesNotContain("--ctx-size", arguments);
+        Assert.DoesNotContain("2048", arguments);
+        Assert.Single(arguments, argument => argument == "-c");
+        Assert.Equal(["-c", "4096"], arguments.TakeLast(2));
+    }
+
+    /// <summary>GPU layers and parallel slots in the extra arguments replace the settings, also when they use another spelling.</summary>
+    [Fact]
+    public void BuildArguments_ExtraGpuLayersAndParallel_ReplaceSettings()
+    {
+        var arguments = LlamaServerSupervisor.BuildArguments(new LlamaCppOptions { ExtraArguments = ["--n_gpu_layers", "0", "-np", "2"] }, 1234);
+
+        Assert.DoesNotContain("--gpu-layers", arguments);
+        Assert.DoesNotContain("--parallel", arguments);
+        Assert.Contains("--ctx-size", arguments);
+        Assert.Equal(["--n_gpu_layers", "0", "-np", "2"], arguments.TakeLast(4));
+    }
+
+    /// <summary>A value never counts as a flag, so the engine still adds its own context size.</summary>
+    [Fact]
+    public void BuildArguments_ValueLooksLikeFlag_KeepsSetting()
+    {
+        var arguments = LlamaServerSupervisor.BuildArguments(new LlamaCppOptions { ContextSize = 2048, ExtraArguments = ["--threads", "-c"] }, 1234);
+
+        Assert.Equal("2048", arguments[arguments.ToList().IndexOf("--ctx-size") + 1]);
+    }
+
+    /// <summary>The engine finds the same config files as llama.cpp on Linux and macOS.</summary>
+    /// <param name="xdgConfigHome">The value of XDG_CONFIG_HOME.</param>
+    /// <param name="home">The value of HOME.</param>
+    /// <param name="expectedFolder">The folder that holds the user's file.</param>
+    [Theory]
+    [InlineData("/x/config", "/home/u", "/x/config")]
+    [InlineData("", "/home/u", "/home/u/.config")]
+    [InlineData(null, "/home/u", "/home/u/.config")]
+    public void ConfigFiles_Unix_FollowsLlamaRules(string? xdgConfigHome, string home, string expectedFolder)
+    {
+        var files = LlamaServerPaths.ConfigFiles(isWindows: false, name => name switch
+        {
+            "XDG_CONFIG_HOME" => xdgConfigHome,
+            "HOME" => home,
+            _ => null,
+        });
+
+        Assert.Equal([Path.Combine("/etc", "llama.cpp", "config.ini"), Path.Combine(expectedFolder, "llama.cpp", "config.ini")], files);
+    }
+
+    /// <summary>The engine finds the same config files as llama.cpp on Windows, and skips a folder whose variable is not set.</summary>
+    [Fact]
+    public void ConfigFiles_Windows_FollowsLlamaRules()
+    {
+        var both = LlamaServerPaths.ConfigFiles(isWindows: true, name => name switch
+        {
+            "PROGRAMDATA" => "P",
+            "APPDATA" => "A",
+            _ => null,
+        });
+        var none = LlamaServerPaths.ConfigFiles(isWindows: true, _ => "");
+
+        Assert.Equal([Path.Combine("P", "llama.cpp", "config.ini"), Path.Combine("A", "llama.cpp", "config.ini")], both);
+        Assert.Empty(none);
+    }
+
+    /// <summary>A llama.cpp config file stops the engine at startup, because llama-server would read it.</summary>
+    /// <returns>A task for the test.</returns>
+    [Fact]
+    public async Task Start_ConfigFileExists_Throws()
+    {
+        var variable = OperatingSystem.IsWindows() ? "APPDATA" : "XDG_CONFIG_HOME";
+        var previous = Environment.GetEnvironmentVariable(variable);
+        var folder = Directory.CreateTempSubdirectory().FullName;
+        try
+        {
+            var configFile = Path.Combine(folder, "llama.cpp", "config.ini");
+            Directory.CreateDirectory(Path.GetDirectoryName(configFile)!);
+            await File.WriteAllTextAsync(configFile, "log-file = x.log", TestContext.Current.CancellationToken);
+            Environment.SetEnvironmentVariable(variable, folder);
+            var (supervisor, _, _) = Create();
+
+            var failure = await Assert.ThrowsAsync<InvalidOperationException>(() => supervisor.StartAsync(TestContext.Current.CancellationToken));
+
+            // A system-wide file on this machine is found first, so the test checks only the file name.
+            Assert.Contains("config.ini", failure.Message, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(variable, previous);
+            Directory.Delete(folder, recursive: true);
+        }
+    }
+
     /// <summary>Requests go through the running server, using the random key created for this run.</summary>
     /// <returns>A task for the test.</returns>
     [Fact]
@@ -117,18 +214,72 @@ public sealed class LlamaServerSupervisorTests : IDisposable
         }
     }
 
-    /// <summary>A server that fails at startup does not stop the engine, and the engine continues to retry it.</summary>
+    /// <summary>A server that fails at startup does not stop the engine. The engine does not start it again, and it keeps the cause.</summary>
     /// <returns>A task for the test.</returns>
     [Fact]
-    public async Task Run_ServerFailsAtStartup_KeepsRetrying()
+    public async Task Run_ServerFailsAtStartup_FailsWithoutRetry()
     {
-        var (supervisor, _, _) = Create("--fail-immediately");
+        var startRecord = Path.GetTempFileName();
+        var (supervisor, _, _) = Create("--record-start-to", startRecord, "--fail-immediately");
         await supervisor.StartAsync(TestContext.Current.CancellationToken);
         try
         {
-            await WaitForAsync(() => supervisor.State == LlamaServerState.Restarting);
+            await WaitForAsync(() => supervisor.State == LlamaServerState.Failed);
 
             Assert.Null(supervisor.Endpoint);
+            Assert.Contains("fake failure", supervisor.FailureReason, StringComparison.Ordinal);
+            Assert.Contains("exit code 3", supervisor.FailureReason, StringComparison.Ordinal);
+
+            // A retry would start the server again after 1 second, so wait longer than that.
+            await Task.Delay(TimeSpan.FromSeconds(2), TestContext.Current.CancellationToken);
+            Assert.Single(await File.ReadAllLinesAsync(startRecord, TestContext.Current.CancellationToken));
+            Assert.Equal(LlamaServerState.Failed, supervisor.State);
+        }
+        finally
+        {
+            await supervisor.StopAsync(CancellationToken.None);
+            File.Delete(startRecord);
+        }
+
+        Assert.Equal(LlamaServerState.Failed, supervisor.State);
+    }
+
+    /// <summary>A local request gets the cause of a failed start, as an upstream error that a retry does not correct.</summary>
+    /// <returns>A task for the test.</returns>
+    [Fact]
+    public async Task Complete_ServerFailed_ReturnsCause()
+    {
+        var (supervisor, provider, _) = Create("--fail-immediately");
+        await supervisor.StartAsync(TestContext.Current.CancellationToken);
+        try
+        {
+            await WaitForAsync(() => supervisor.State == LlamaServerState.Failed);
+
+            var result = await provider.CompleteAsync(TestRequests.Minimal with { Model = "test-model" }, TestContext.Current.CancellationToken);
+
+            Assert.Equal(ErrorKind.Upstream, result.Error!.Kind);
+            Assert.Contains("fake failure", result.Error.Message, StringComparison.Ordinal);
+            Assert.Null(result.Error.RetryAfter);
+        }
+        finally
+        {
+            await supervisor.StopAsync(CancellationToken.None);
+        }
+    }
+
+    /// <summary>A server that crashes again and again is not restarted for ever. After three crashes, the local model fails.</summary>
+    /// <returns>A task for the test.</returns>
+    [Fact]
+    public async Task Run_ServerCrashesThreeTimes_Fails()
+    {
+        // The server must live long enough for a health check, so that each run counts as a crash of a ready server.
+        var (supervisor, _, _) = Create("--exit-after-ms", "1000");
+        await supervisor.StartAsync(TestContext.Current.CancellationToken);
+        try
+        {
+            await WaitForAsync(() => supervisor.State == LlamaServerState.Failed);
+
+            Assert.Contains("stopped 3 times", supervisor.FailureReason, StringComparison.Ordinal);
         }
         finally
         {
@@ -278,26 +429,43 @@ public sealed class LlamaServerSupervisorTests : IDisposable
         }
     }
 
-    /// <summary>The server does not receive the engine's own secrets, only the key for this run.</summary>
+    /// <summary>The server does not receive the engine's own secrets or llama.cpp settings, only the key for this run.</summary>
     /// <returns>A task for the test.</returns>
     [Fact]
     public async Task Start_EngineHasSecrets_DoesNotPassThemToServer()
     {
-        Environment.SetEnvironmentVariable("Providers__test__ApiKey", "cloud-secret");
+        string[] llamaSettings =
+        [
+            "LLAMA_ARG_LOG_FILE", "LLAMA_ARG_NO_WARMUP", "LLAMA_TRACE", "HF_TOKEN", "MTMD_BACKEND_DEVICE",
+            "GGML_BACKEND_PATH", "AIP_MODE", "https_proxy", "MODEL_ENDPOINT",
+        ];
+        var previous = llamaSettings.ToDictionary(name => name, Environment.GetEnvironmentVariable);
         var reportFile = Path.GetTempFileName();
         var (supervisor, _, _) = Create("--write-environment-to", reportFile);
-        await supervisor.StartAsync(TestContext.Current.CancellationToken);
         try
         {
+            Environment.SetEnvironmentVariable("Providers__test__ApiKey", "cloud-secret");
+            foreach (var name in llamaSettings)
+            {
+                Environment.SetEnvironmentVariable(name, "llama-setting");
+            }
+
+            await supervisor.StartAsync(TestContext.Current.CancellationToken);
             await WaitForAsync(() => supervisor.State == LlamaServerState.Ready);
             var report = await File.ReadAllTextAsync(reportFile, TestContext.Current.CancellationToken);
 
             Assert.Contains("LLAMA_API_KEY", report, StringComparison.Ordinal);
             Assert.DoesNotContain("cloud-secret", report, StringComparison.Ordinal);
+            Assert.DoesNotContain("llama-setting", report, StringComparison.Ordinal);
         }
         finally
         {
             Environment.SetEnvironmentVariable("Providers__test__ApiKey", null);
+            foreach (var (name, value) in previous)
+            {
+                Environment.SetEnvironmentVariable(name, value);
+            }
+
             await supervisor.StopAsync(CancellationToken.None);
             File.Delete(reportFile);
         }

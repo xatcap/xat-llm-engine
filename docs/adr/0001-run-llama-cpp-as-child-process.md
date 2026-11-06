@@ -28,6 +28,16 @@ The key goes through the `LLAMA_API_KEY` environment variable, because command-l
 - Only one engine should run per install, because they share that PID file.
 - Each request makes one more local HTTP call. The time for this call is small compared with the generation time.
 
+## Amendment (2026-11-06)
+
+The engine no longer restarts the server after every failure.
+
+- A failed start ends the attempts until the engine restarts. Examples are a wrong setting, a model that does not load, a load timeout, and a llama.cpp config file. Local requests return 502 with the cause.
+- The engine restarts the server after a crash or a hang only when the server was ready before. After 3 crashes in 10 minutes, the engine stops the restarts, and local requests return 502.
+- The engine removes all llama.cpp variables from the server's environment, not only `Providers__*`. See `LlamaServerSupervisor.IsLlamaSetting`.
+
+Reason: a wrong setting does not correct itself. A restart loop hid the cause, and callers saw only "still loading".
+
 ## Alternatives considered
 
 - **P/Invoke against `libllama`:** rejected because of the fast-changing API, and because a native crash would end the API process.

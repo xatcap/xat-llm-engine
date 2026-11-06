@@ -71,7 +71,7 @@ curl http://127.0.0.1:8420/v1/chat/completions \
 |---|---|
 | `POST /v1/chat/completions` | Chat, with or without streaming. The accepted fields depend on the provider. See [Request templates](#request-templates). |
 | `GET /v1/models` | Lists the configured models as `provider/model`. |
-| `GET /health` | Returns `status` (`healthy` or `degraded`), `local` (`ready`, `starting`, `restarting`, `missing`, `stopped` or `disabled`) and `message`, which explains `local`. It always returns 200, including while the local model loads. Read `local` to see whether the local model is ready. |
+| `GET /health` | Returns `status` (`healthy` or `degraded`), `local` (`ready`, `starting`, `restarting`, `missing`, `failed`, `stopped` or `disabled`) and `message`, which explains `local`. It always returns 200, including while the local model loads. Read `local` to see whether the local model is ready. |
 | `GET /swagger` | Swagger UI. Development only. |
 | `GET /openapi/v1.json` | The OpenAPI document. Development only. |
 
@@ -84,7 +84,7 @@ Answers are text only. `tools` and `n` are not in any template, because the unif
 | 405 | The route exists, but does not accept this HTTP method. |
 | 415 | The `Content-Type` is not `application/json`. |
 | 429 | The provider is rate limiting. See `Retry-After`. |
-| 502 | The provider failed. |
+| 502 | The provider failed. For the local model, `llama-server` could not start, or it stopped too often. The message gives the cause. A retry does not help. Correct the settings, then restart the engine. |
 | 503 | One of these conditions applies: the local model is loading or missing, the provider has too much load, or the engine cannot reach the provider. See `Retry-After`. |
 
 When the provider sends its own `Retry-After` header, the engine uses that wait. The engine limits the wait to 30 seconds, rounds it up to whole seconds and sends at least 1 second. If the provider sends no header, or the engine returns the 503 itself, the value is 5 seconds.
@@ -152,13 +152,13 @@ Settings live in `appsettings.json`, next to the program. This file lists every 
 | `Providers__<name>__RequestFields__0` | Sets the field at index 0 of a provider's request template. Add more with `__1`, `__2` and so on. Overrides replace entries by index, and they cannot shorten the list. To remove a field, edit `appsettings.json`. |
 | `Urls` | The listening address. It must be a loopback address. The default is `http://127.0.0.1:8420`. |
 | `AllowedHosts` | The host names callers may use. The default allows only loopback names. |
-| `LocalModel__ContextSize` | The context size in tokens. The default is 8192. |
-| `LocalModel__GpuLayers` | `auto` (default), `all`, or a number. Use `0` to run on the CPU only. |
-| `LocalModel__Parallel` | How many requests generate at once. These requests share the context size. The default is 1. |
+| `LocalModel__ContextSize` | The context size in tokens. The default is 8192. `--ctx-size` or `-c` in `ExtraArguments` replaces this setting. |
+| `LocalModel__GpuLayers` | `auto` (default), `all`, or a number. Use `0` to run on the CPU only. `--gpu-layers` or `-ngl` in `ExtraArguments` replaces this setting. |
+| `LocalModel__Parallel` | How many requests generate at once. These requests share the context size. The default is 1. `--parallel` or `-np` in `ExtraArguments` replaces this setting. |
 | `LocalModel__DefaultTemperature` | The temperature when a caller sends none. The default is 0.07, as Mistral recommends values below 0.1. |
 | `LocalModel__StartupTimeoutSeconds` | How long the model may take to load. The default is 600. |
 | `LocalModel__HealthCheckIntervalSeconds` | Seconds between health checks of a running llama-server. Three failed checks in a row make the engine replace it, because a hung server never exits by itself. The default is 10. |
-| `LocalModel__ExtraArguments__0` | An extra `llama-server` argument. Add more with `__1`, `__2` and so on. |
+| `LocalModel__ExtraArguments__0` | An extra `llama-server` argument. Add more with `__1`, `__2` and so on. Write a flag and its value as two entries, for example `--threads` and then `4`. A value must follow its flag. A value cannot start with `-`, unless it is a number such as `-1`. The engine allows only tuning flags, such as `--threads` and `--flash-attn`. Any other flag, such as `--log-file` or `--webui`, stops the engine at startup. |
 | `LocalModel__RequestFields__0` | Sets the field at index 0 of the local model's request template. Add more with `__1`, `__2` and so on. Overrides replace entries by index, and they cannot shorten the list. To remove a field, edit `appsettings.json`. |
 | `LocalModel__Enabled` | Set to `false` to run with cloud providers only. |
 
@@ -196,6 +196,12 @@ This is not possible at this time. The API has no authentication, so only progra
 - Run one engine per install. A second engine started from the same folder stops the first one's `llama-server`.
 - If the engine is killed, its `llama-server` continues to run until the next engine start. That start stops the `llama-server`, but only if the process name and start time still match the engine's PID file. The PID file is in the `xat-llm-engine` folder, inside the user's local application data folder.
 - To see `llama-server`'s own output, start the engine with the argument `--Logging:LogLevel:XatLlmEngine.Infrastructure.LlamaCpp=Debug`.
+- The engine does not start `llama-server` again after a failed start, because a wrong setting does not correct itself. Examples are a wrong value in `ExtraArguments`, a model that does not load, and a load that takes too long. Local requests then return 502 with the cause.
+- If `llama-server` stops unexpectedly after it was ready, the engine starts it again. After 3 stops in 10 minutes, the engine does not start it again, and local requests return 502.
+- The engine removes the llama.cpp variables from the environment of `llama-server`. These are the variables that start with `LLAMA_`, `LLAMACPP_`, `GGML_`, `MTMD_`, `AIP_`, `HF_` or `LLGUIDANCE_`, and `MODEL_ENDPOINT`, `HTTP_PROXY` and `HTTPS_PROXY`. The variables of the operating system and the GPU drivers stay.
+- The engine does not start if a llama.cpp config file exists, because `llama-server` always reads it. A file from another llama.cpp installation also stops the engine. Remove or rename the file. With `LocalModel__Enabled=false`, or without the model file, the engine does not do this check. The engine also does this check before each restart of `llama-server`. A file found then makes the local model fail. The files are:
+  - Linux and macOS: `/etc/llama.cpp/config.ini`, and `$XDG_CONFIG_HOME/llama.cpp/config.ini` or `~/.config/llama.cpp/config.ini`.
+  - Windows: `%PROGRAMDATA%\llama.cpp\config.ini` and `%APPDATA%\llama.cpp\config.ini`.
 
 ## Develop
 

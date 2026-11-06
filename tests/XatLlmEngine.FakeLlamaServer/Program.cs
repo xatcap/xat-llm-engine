@@ -8,8 +8,16 @@ var port = int.Parse(settings["--port"], CultureInfo.InvariantCulture);
 var expectedKey = Environment.GetEnvironmentVariable("LLAMA_API_KEY");
 var loadDelay = TimeSpan.FromMilliseconds(settings.TryGetValue("--load-delay-ms", out var delay) ? int.Parse(delay, CultureInfo.InvariantCulture) : 0);
 
+if (settings.TryGetValue("--record-start-to", out var startRecord))
+{
+    // One line for each start, so that a test can count the starts.
+    File.AppendAllText(startRecord, "started" + Environment.NewLine);
+}
+
 if (settings.ContainsKey("--fail-immediately"))
 {
+    // The same kind of line that llama-server writes for a wrong value.
+    Console.Error.WriteLine("error while handling argument \"--fake\": fake failure");
     return 3;
 }
 

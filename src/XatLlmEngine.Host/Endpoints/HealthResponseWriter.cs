@@ -28,9 +28,10 @@ internal static class HealthResponseWriter
         "ready" => "The local model is ready.",
         "disabled" => "The local model is turned off in settings.",
         "starting" => "The local model is loading. Local requests return 503 until it is ready. Cloud providers continue to work.",
-        "restarting" => "llama-server stopped or failed to load, and the engine is restarting it. Local requests return 503 until then. Cloud providers continue to work.",
+        "restarting" => "llama-server stopped unexpectedly, and the engine is restarting it. Local requests return 503 until then. Cloud providers continue to work.",
         "missing" => "The model or server file is missing. Local requests return 503 until you install the file and restart the engine. Cloud providers continue to work.",
         "stopped" => "The engine is stopping.",
+        "failed" => "llama-server could not start, or it stopped too often. Local requests return 502 with the cause. Correct the settings, then restart the engine. Cloud providers continue to work.",
         _ => "The local model's stage is unknown.",
     };
 }

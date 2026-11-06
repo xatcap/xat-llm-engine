@@ -65,6 +65,12 @@ internal sealed class LocalChatProvider(
             return null;
         }
 
+        if (supervisor.State == LlamaServerState.Failed)
+        {
+            // A retry does not help, so this is not an Unavailable error with a wait time.
+            return new EngineError(ErrorKind.Upstream, $"The local model failed: {supervisor.FailureReason} Correct the cause. Then restart the engine.");
+        }
+
         return new EngineError(
             ErrorKind.Unavailable,
             supervisor.State == LlamaServerState.Missing

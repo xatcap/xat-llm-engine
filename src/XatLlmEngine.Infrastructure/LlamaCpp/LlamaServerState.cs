@@ -9,7 +9,7 @@ internal enum LlamaServerState
     /// <summary>The model is loaded and can serve requests.</summary>
     Ready,
 
-    /// <summary>The server stopped unexpectedly. The engine will start it again after a delay.</summary>
+    /// <summary>The server stopped unexpectedly after it was ready. The engine will start it again after a delay.</summary>
     Restarting,
 
     /// <summary>The model file or the server program is missing, so the local provider stays off.</summary>
@@ -17,4 +17,7 @@ internal enum LlamaServerState
 
     /// <summary>The engine is stopping.</summary>
     Stopped,
+
+    /// <summary>llama-server could not start, or it stopped too often. The engine does not try again until the engine restarts.</summary>
+    Failed,
 }
