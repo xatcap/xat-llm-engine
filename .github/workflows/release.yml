@@ -16,8 +16,9 @@ on:
 permissions:
   contents: read
 
+# MSBuild reads each environment variable as a property. Do not use the name of an MSBuild property here, for example VERSION.
 env:
-  VERSION: ${{ github.event_name == 'push' && github.ref_name || inputs.version }}
+  RELEASE_VERSION: ${{ github.event_name == 'push' && github.ref_name || inputs.version }}
 
 jobs:
   # A release builds only from a commit that passes every test on every platform.
@@ -50,7 +51,7 @@ jobs:
         shell: bash
         run: |
           if [ "${{ github.event_name }}" = "push" ]; then
-            python build/release.py check-changelog --version "${VERSION#v}" --notes release-notes.md
+            python build/release.py check-changelog --version "${RELEASE_VERSION#v}" --notes release-notes.md
           else
             python build/release.py check-changelog --notes release-notes.md
           fi
@@ -85,9 +86,9 @@ jobs:
       - name: Check the version
         shell: bash
         run: |
-          plain="${VERSION#v}"
+          plain="${RELEASE_VERSION#v}"
           if ! [[ "$plain" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]]; then
-            echo "'$VERSION' is not a valid version." >&2
+            echo "'$RELEASE_VERSION' is not a valid version." >&2
             exit 1
           fi
           echo "PACKAGE_VERSION=$plain" >> "$GITHUB_ENV"
@@ -151,7 +152,7 @@ jobs:
           ln model-cache/Ministral-3-3B-Instruct-2512-Q4_K_M.gguf release/
           cp build/licenses/Ministral-LICENSE.txt release/
       - name: Add the API document
-        run: python build/release.py openapi --version "${VERSION#v}" --output release
+        run: python build/release.py openapi --version "${RELEASE_VERSION#v}" --output release
       - name: Check the size limit and write checksums
         run: python build/release.py finalize --folder release
       - name: Create the release
@@ -160,14 +161,14 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           IS_TAG: ${{ github.event_name == 'push' }}
         run: |
-          label="${VERSION}"
+          label="${RELEASE_VERSION}"
           flags=()
           if [ "$IS_TAG" = "true" ]; then
             flags+=(--verify-tag)
-            case "$VERSION" in *-*) flags+=(--prerelease) ;; esac
+            case "$RELEASE_VERSION" in *-*) flags+=(--prerelease) ;; esac
           else
-            label="dryrun-${VERSION}-${GITHUB_RUN_ID}"
-            flags+=(--target "$GITHUB_SHA" --title "Dry run ${VERSION}")
+            label="dryrun-${RELEASE_VERSION}-${GITHUB_RUN_ID}"
+            flags+=(--target "$GITHUB_SHA" --title "Dry run ${RELEASE_VERSION}")
           fi
           # The release stays a draft until the upload of every file is complete, so nobody can download a partial release.
           gh release create "$label" --draft --notes-file notes/release-notes.md "${flags[@]}"
