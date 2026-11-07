@@ -230,9 +230,18 @@ def notice_problems():
             problems.append(f"The package {name} {packages[name]} ships with the engine, but build/third-party.json does not list it. Add it with its license files.")
     for name in sorted(set(manifest["nuget"]) - set(packages)):
         problems.append(f"build/third-party.json lists {name}, but the engine no longer uses it. Remove it.")
-    files = [file for entry in manifest["nuget"].values() for file in entry["files"]] + list(manifest["llamaCpp"]["bundled"].values())
+    llama = manifest["llamaCpp"]
+    pinned = load_lock("llama-cpp.lock.json")["tag"]
+    if llama["tag"] != pinned:
+        problems.append(f"build/third-party.json has the llama.cpp tag {llama['tag']}, but build/llama-cpp.lock.json pins {pinned}. Read the license texts of {pinned} again, then change the tag.")
+    if f"build {llama['tag']}" not in notices:
+        problems.append(f"THIRD_PARTY_NOTICES.md does not name the llama.cpp build {llama['tag']}.")
+    files = [file for entry in manifest["nuget"].values() for file in entry["files"]] + list(llama["bundled"].values()) + [llama["file"]]
+    names = list(manifest["nuget"]) + list(llama["bundled"])
+    for platform in llama["platformFiles"].values():
+        files += [entry["file"] for entry in platform.values()]
+        names += list(platform)
     problems += [f"The license file build/licenses/{file} does not exist." for file in files if not (LICENSES / file).is_file()]
-    names = list(manifest["nuget"]) + list(manifest["llamaCpp"]["bundled"])
     problems += [f"THIRD_PARTY_NOTICES.md does not name {name}." for name in names if name not in notices]
     return problems
 
@@ -244,6 +253,30 @@ def check_notices(args):
     print("build/third-party.json lists every shipped package, and every license file exists.")
 
 
+def same_text(first, second):
+    """Compares two text files. Git on a Windows runner can change LF to CRLF, so the line endings do not count."""
+    return first.read_bytes().replace(b"\r\n", b"\n") == second.read_bytes().replace(b"\r\n", b"\n")
+
+
+def llama_license_problems(folder, rid, llama):
+    """Compares the license texts in the llama.cpp folder with the copies in build/licenses.
+
+    An archive can omit the llama.cpp license, because build/licenses has it. A text in the archive must be the same as the
+    copy, so that a new llama.cpp build cannot ship an old text. A text for one platform must be in the archive of that platform.
+    """
+    problems = []
+    archive_license = folder / llama["archiveFile"]
+    if archive_license.is_file() and not same_text(archive_license, LICENSES / llama["file"]):
+        problems.append(f"The llama.cpp archive has a {llama['archiveFile']} that is different from build/licenses/{llama['file']}. Read the new text, and update the file.")
+    for name, entry in llama["platformFiles"].get(rid, {}).items():
+        archive_file = folder / entry["archiveFile"]
+        if not archive_file.is_file():
+            problems.append(f"The llama.cpp archive for {rid} has no {entry['archiveFile']}, the license of {name}. Check if the archive still includes {name}, and update build/third-party.json.")
+        elif not same_text(archive_file, LICENSES / entry["file"]):
+            problems.append(f"The llama.cpp archive has a {entry['archiveFile']} that is different from build/licenses/{entry['file']}. Read the new text, and update the file.")
+    return problems
+
+
 def copy_licenses(stage, rid):
     """Copies the full license and notice texts into the package. It stops the build when a text is missing."""
     problems = notice_problems()
@@ -252,13 +285,18 @@ def copy_licenses(stage, rid):
     manifest = load_manifest()
     target = stage / "licenses"
 
-    llama_license = stage / "llama" / manifest["llamaCpp"]["archiveFile"]
-    if not llama_license.is_file():
-        sys.exit(f"The llama.cpp archive has no {manifest['llamaCpp']['archiveFile']}, so the package would ship llama.cpp without its license.")
+    llama = manifest["llamaCpp"]
+    problems = llama_license_problems(stage / "llama", rid, llama)
+    if problems:
+        sys.exit("\n".join(problems))
+    # The Windows archive has no llama.cpp license, so every package gets the copy from build/licenses.
+    shutil.copy(LICENSES / llama["file"], stage / "llama" / llama["archiveFile"])
     (target / "llama.cpp").mkdir(parents=True)
-    shutil.copy(llama_license, target / "llama.cpp" / "LICENSE")
-    for file in manifest["llamaCpp"]["bundled"].values():
+    shutil.copy(LICENSES / llama["file"], target / "llama.cpp" / "LICENSE")
+    for file in llama["bundled"].values():
         shutil.copy(LICENSES / file, target / file)
+    for entry in llama["platformFiles"].get(rid, {}).values():
+        shutil.copy(LICENSES / entry["file"], target / entry["file"])
 
     # The restore output names the exact packages of the build, and the folder that holds them.
     assets = json.loads(HOST_ASSETS.read_text(encoding="utf-8"))
@@ -289,11 +327,14 @@ def copy_licenses(stage, rid):
             shutil.copy(source, folder / file)
 
 
-def expected_license_files():
-    """Gives the license files that every package must contain, relative to its root folder."""
+def expected_license_files(rid):
+    """Gives the license files that the package of a platform must contain, relative to its root folder."""
     manifest = load_manifest()
-    files = ["LICENSE", "THIRD_PARTY_NOTICES.md", "llama/LICENSE", "licenses/llama.cpp/LICENSE"]
-    files += [f"licenses/{file}" for file in manifest["llamaCpp"]["bundled"].values()]
+    llama = manifest["llamaCpp"]
+    files = ["LICENSE", "THIRD_PARTY_NOTICES.md", f"llama/{llama['archiveFile']}", "licenses/llama.cpp/LICENSE"]
+    files += [f"licenses/{file}" for file in llama["bundled"].values()]
+    for entry in llama["platformFiles"].get(rid, {}).values():
+        files += [f"llama/{entry['archiveFile']}", f"licenses/{entry['file']}"]
     for name, entry in manifest["nuget"].items():
         files += [f"licenses/nuget/{name}/{Path(file).name}" for file in entry["files"] + entry.get("packageFiles", [])]
     for pack, pack_files in manifest["runtimePacks"].items():
@@ -337,7 +378,7 @@ def smoke_test(args):
         program = root / program_file_name(rid)
         if not (root / "llama" / server_file_name(rid)).exists():
             sys.exit("The package has no llama-server.")
-        missing = [file for file in expected_license_files() if not (root / file).is_file()]
+        missing = [file for file in expected_license_files(rid) if not (root / file).is_file()]
         if missing:
             sys.exit(f"The package has no license file {', '.join(missing)}.")
         # A hard link avoids copying 2 GiB.

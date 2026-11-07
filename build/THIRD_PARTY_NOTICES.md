@@ -5,6 +5,7 @@ xat-llm-engine uses the MIT License (see `LICENSE`). Its release packages also i
 | Component | Where it appears | License | Texts in the package |
 |---|---|---|---|
 | llama.cpp (build b12110) | The `llama/` folder | MIT | `llama/LICENSE` and `licenses/llama.cpp/LICENSE` |
+| LLVM OpenMP | Only the Windows package: `libomp.dll` in the `llama/` folder | Apache-2.0 with LLVM Exceptions | `llama/LICENSE-LLVM-OpenMP` and `licenses/llama.cpp/LLVM-OpenMP.txt` |
 | cpp-httplib | Inside llama.cpp | MIT | `licenses/llama.cpp/cpp-httplib.txt` |
 | nlohmann/json | Inside llama.cpp | MIT | `licenses/llama.cpp/nlohmann-json.txt` |
 | miniaudio | Inside llama.cpp | Public domain or MIT-0 | `licenses/llama.cpp/miniaudio.txt` |

@@ -25,7 +25,7 @@ The release workflow uses the section of each version as its release notes. Writ
   - Mistral accepts `stream_options` with only `include_usage`. The engine removes the field, and holds back the token counts when `include_usage` is `false`.
   - A token limit error names the field that the caller sent.
   - The `chat` trace has the tag `xat_engine.renamed_fields`, with names only.
-- Each package has a `licenses/` folder with the full license and notice texts of each third-party component. This includes the libraries inside llama.cpp and the .NET runtime. The release stops when a text is missing.
+- Each package has a `licenses/` folder with the full license and notice texts of each third-party component. This includes the libraries inside llama.cpp and the .NET runtime. The Windows package also includes the license of LLVM OpenMP (`libomp.dll`). The release stops when a text is missing.
 - `Api:StreamCommitSeconds` (default 15). When a stream waits longer for its first piece, the engine sends status 200. It then sends a `: keep-alive` comment every 15 seconds. These comments stop the caller's read time limit from ending.
 - `Providers:<name>:TokenBudget` and `BudgetPeriodHours`. A provider that has used its budget in the rolling period gets 429 with the type `budget_exceeded_error`, and `/health` reports `budget_exhausted`. The counts survive a restart.
 - `LocalModel:MaxTokensLimit`. A request that asks for more tokens than a limit gets 400.
@@ -87,6 +87,7 @@ The release workflow uses the section of each version as its release notes. Writ
 ### Fixed
 
 - A listening address with the wrong format in `Urls` or `Kestrel:Endpoints` now stops the engine with the same kind of startup error as the other address checks, and the message names the address. Before, the engine stopped with an error from ASP.NET.
+- The Windows package includes the llama.cpp license in `llama/LICENSE`. The llama.cpp Windows archive does not include this license, so the Windows packages of 1.0.0 and 1.0.1 did not have it.
 
 ## [1.0.1] - 2026-11-05
 

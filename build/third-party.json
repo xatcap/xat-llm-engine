@@ -1,5 +1,5 @@
 {
-  "comment": "Every third-party component that the release packages ship, and its license files. 'release.py check-notices' fails when a shipped NuGet package is not here, or when a file is missing. Paths in 'files' start at build/licenses.",
+  "comment": "Every third-party component that the release packages ship, and its license files. 'release.py check-notices' fails when a shipped NuGet package is not here, when a file is missing, or when the llama.cpp tag is not the pinned tag. Paths in 'files' start at build/licenses.",
   "nuget": {
     "Microsoft.AspNetCore.OpenApi": {
       "license": "MIT",
@@ -22,8 +22,16 @@
     "Microsoft.AspNetCore.App.Runtime": ["LICENSE.txt", "THIRD-PARTY-NOTICES.TXT"]
   },
   "llamaCpp": {
+    "comment": "'tag' must be the tag in llama-cpp.lock.json. When the pin changes, read the license texts of the new build again, then change 'tag'. 'file' is the llama.cpp license, from build/licenses. The Windows archive does not include it, so every package gets this copy. 'archiveFile' is a file name in the llama.cpp folder of an archive. When an archive includes it, the release stops if its text is different from 'file'. 'platformFiles' lists, for each runtime identifier, the texts that only the archive of that platform includes. That archive must include them.",
+    "tag": "b12110",
     "license": "MIT",
     "archiveFile": "LICENSE",
+    "file": "llama.cpp/LICENSE",
+    "platformFiles": {
+      "win-x64": {
+        "LLVM OpenMP": { "license": "Apache-2.0 with LLVM Exceptions", "archiveFile": "LICENSE-LLVM-OpenMP", "file": "llama.cpp/LLVM-OpenMP.txt" }
+      }
+    },
     "bundled": {
       "cpp-httplib": "llama.cpp/cpp-httplib.txt",
       "nlohmann/json": "llama.cpp/nlohmann-json.txt",
