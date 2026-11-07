@@ -37,7 +37,11 @@ builder.Logging.ClearProviders();
 builder.WebHost.ConfigureKestrel(options => options.Listen(System.Net.IPAddress.Loopback, port));
 var app = builder.Build();
 var startedAt = TimeProvider.System.GetTimestamp();
-var unhealthyAfter = settings.TryGetValue("--unhealthy-after-ms", out var unhealthy)
+
+// --unhealthy-after-ms counts from the first 200 on /health, not from the start of the process.
+// Thus a slow computer cannot miss the healthy time. Zero means that /health did not answer 200 yet.
+long firstHealthyAt = 0;
+var unhealthyAfter =settings.TryGetValue("--unhealthy-after-ms", out var unhealthy)
     ? TimeSpan.FromMilliseconds(int.Parse(unhealthy, CultureInfo.InvariantCulture))
     : TimeSpan.MaxValue;
 
@@ -59,8 +63,14 @@ if (settings.TryGetValue("--write-environment-to", out var environmentReport))
 
 app.MapGet("/health", () =>
 {
-    var elapsed = TimeProvider.System.GetElapsedTime(startedAt);
-    return elapsed < loadDelay || elapsed > unhealthyAfter || (healthFailsWhileBusy && Volatile.Read(ref active) > 0)
+    if (TimeProvider.System.GetElapsedTime(startedAt) < loadDelay || (healthFailsWhileBusy && Volatile.Read(ref active) > 0))
+    {
+        return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
+    }
+
+    // Kestrel can run two requests at the same time, so only the first one sets the value.
+    Interlocked.CompareExchange(ref firstHealthyAt, TimeProvider.System.GetTimestamp(), 0);
+    return TimeProvider.System.GetElapsedTime(Interlocked.Read(ref firstHealthyAt)) > unhealthyAfter
         ? Results.StatusCode(StatusCodes.Status503ServiceUnavailable)
         : Results.Ok();
 });
