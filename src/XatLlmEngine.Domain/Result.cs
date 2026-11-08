@@ -7,7 +7,7 @@ namespace XatLlmEngine.Domain;
 [SuppressMessage(
     "Design",
     "CA1000:Do not declare static members on generic types",
-    Justification = "Result<T>.Ok and Result<T>.Fail are the factory pattern in docs/dotnet/csharp-best-practices.md.")]
+    Justification = "Result<T>.Ok and Result<T>.Fail are the factory pattern in docs/portable/dotnet/csharp-best-practices.md.")]
 public sealed record Result<T>
     where T : notnull
 {

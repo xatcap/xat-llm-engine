@@ -26,7 +26,7 @@ A change in this file is a change to the contract. [ADR 0005](adr/0005-versionin
 
 ## Architecture
 
-The code follows Clean Architecture, as described in [dotnet/clean-architecture.md](dotnet/clean-architecture.md). Decisions and their reasons are in [adr](adr). All text follows the rules in [writing-style.md](writing-style.md).
+The code follows Clean Architecture, as described in [portable/dotnet/clean-architecture.md](portable/dotnet/clean-architecture.md). Decisions and their reasons are in [adr](adr). All text follows the rules in [writing-style.md](portable/writing-style/writing-style.md).
 
 ```text
 src/XatLlmEngine.Domain          Core types and rules, with no dependencies

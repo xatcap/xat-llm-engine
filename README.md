@@ -83,7 +83,7 @@ The engine sends no telemetry. At the default log level, its logs never hold pro
 
 ## Develop
 
-Build and test commands are in the [development guide](docs/development.md#build-and-test). All text follows the rules in [docs/writing-style.md](docs/writing-style.md).
+Build and test commands are in the [development guide](docs/development.md#build-and-test). All text follows the rules in [docs/portable/writing-style/writing-style.md](docs/portable/writing-style/writing-style.md).
 
 ## License
 

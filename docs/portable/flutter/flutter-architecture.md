@@ -387,7 +387,7 @@ Unexpected errors (bugs) are not translated. They go to `Bloc.observer.onError` 
 - Keep repositories, API clients, and `core` as **pure Dart packages** (no `flutter` dependency). This guarantees that they contain no UI code, and that `dart test` can test them.
 - Inside a package, keep everything under `src/` and export only the public API. The `implementation_imports` lint stops other packages from reaching into `src/`.
 - Add a CI check that fails when a package has a dependency that its type does not allow. For example, use a script over each `pubspec.yaml`, or a custom lint rule with `custom_lint`.
-- Record significant architecture decisions as [ADRs](../adr).
+- Record significant architecture decisions as [ADRs](../../adr).
 
 ---
 

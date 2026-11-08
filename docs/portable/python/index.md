@@ -1,6 +1,6 @@
 # Python Engineering Guidelines
 
-These rules apply to Python code. Like the [.NET](../dotnet/index.md) and [Flutter](../flutter/index.md) pages, they are a **shared baseline**. If a rule does not fit, you can use a different solution, and you must write down why. General principles (SOLID, coupling, ADRs) are in the .NET pages. This page does not repeat them. All text follows the [writing style](../writing-style.md).
+These rules apply to Python code. Like the [.NET](../dotnet/index.md) and [Flutter](../flutter/index.md) pages, they are a **shared baseline**. If a rule does not fit, you can use a different solution, and you must write down why. General principles (SOLID, coupling, ADRs) are in the .NET pages. This page does not repeat them. All text follows the [writing style](../writing-style/writing-style.md).
 
 **Baseline:** Python 3.12+ · `uv` workspaces · `ruff` (lint and format) · `pyright` in strict mode · `pytest` with `pytest-asyncio`.
 
