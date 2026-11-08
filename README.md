@@ -81,10 +81,6 @@ The engine sends no telemetry. At the default log level, its logs never hold pro
 | [Architecture decisions](docs/adr) | The significant decisions and their reasons. |
 | [CHANGELOG.md](CHANGELOG.md) | The changes in each release. |
 
-## Develop
-
-Build and test commands are in the [development guide](docs/development.md#build-and-test). All text follows the rules in [docs/portable/writing-style/writing-style.md](docs/portable/writing-style/writing-style.md).
-
 ## License
 
 MIT. See [LICENSE](LICENSE) for this project, and [build/THIRD_PARTY_NOTICES.md](build/THIRD_PARTY_NOTICES.md) for the third-party software and the model. Each package has the full license and notice texts in its `licenses/` folder.
