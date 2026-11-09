@@ -3,7 +3,7 @@ using System.Text;
 
 namespace XatLlmEngine.Infrastructure;
 
-/// <summary>The engine's private data folder for this install. It holds the instance lock, the PID file of llama-server and the usage counts.</summary>
+/// <summary>The engine's private data folder for this install. It holds the instance lock and the PID file of llama-server.</summary>
 /// <remarks>
 /// The folder is in the user's private data folder, with one subfolder for each install folder. In a shared temp folder,
 /// another user can put a link there, and the engine then writes through the link.

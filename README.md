@@ -14,14 +14,14 @@ An LLM engine that you put inside your desktop app. It gives your app one local 
 The engine is for developers of desktop apps who want these things:
 
 - AI features that work offline by default, with a small local model.
-- Cloud models from Anthropic, OpenAI or Mistral when the app needs more, with a hard limit on the cost.
+- Cloud models from OpenAI or Mistral when the app needs more, with a limit on the output tokens of each request.
 - No extra installation for the users of the app. The engine and the model go inside the app's installer.
 
 ## Why use it
 
 - **It goes inside your app.** One folder with no runtime to install. Your app starts it, finds its address, and stops it.
 - **It works offline first.** The local model runs on the user's machine. The engine sends no telemetry and never downloads files.
-- **It limits the cost of cloud models.** The engine never retries a request. Each provider can have a token limit for each request, and a token budget for a period such as one day. Your app can read how much of the budget is left.
+- **It limits the cost of cloud models.** The engine never retries a request. Each provider can have a token limit for each request.
 - **It fails in a predictable way.** Each kind of failure has one status code and one error type. The health values are stable, so your app can show the right message.
 - **It does not break your app on an update.** The engine follows Semantic Versioning, and each release has its API document.
 
@@ -55,30 +55,23 @@ curl http://127.0.0.1:8420/v1/chat/completions \
   -d '{"model":"local/ministral-3-3b","messages":[{"role":"user","content":"Hello"}]}'
 ```
 
-The model takes a little while to load. [Install](docs/operations.md#install) has the full steps and the notes for macOS, Windows and Linux.
-
-## Put it in your app
-
-[Include the engine in an app](docs/embedding.md) tells how your app can start the engine on a free port, read its address, and stop it. It also tells how to sign the files and where to keep the engine's data.
+The model takes a little while to load. [Quick start](docs/quickstart.md) has the full steps and the notes for macOS, Windows and Linux.
 
 ## Cloud providers
 
-Set the API key of a provider in an environment variable, for example `Providers__openai__ApiKey`. Then send requests to a model such as `openai/<model>`. With the [portable fields](docs/api.md#portable-fields), one request body works for the local model, OpenAI and Mistral, so your app changes only `model`. Anthropic uses its own request format. Every provider gives the same response format.
+Set the API key of a provider in an environment variable, for example `Providers__openai__ApiKey`. Then send requests to a model such as `openai/<model>`. Each provider has its own [request template](docs/api.md#request-templates). Every provider gives the same response format.
 
 ## Privacy
 
-The engine sends no telemetry. At the default log level, its logs never hold prompts or answers. See [Privacy](docs/operations.md#privacy).
+The engine sends no telemetry. At the default log level, its logs never hold prompts or answers.
 
 ## Documentation
 
 | Page | What it covers |
 |---|---|
-| [Include the engine in an app](docs/embedding.md) | Start, find, stop and ship the engine inside a desktop app. |
+| [Quick start](docs/quickstart.md) | Download a release, prepare its folder, and start the API. |
 | [API reference](docs/api.md) | Routes, request templates, streams, errors, health and compatibility. |
-| [Configuration](docs/configuration.md) | Each setting, how to add a provider, and how to change the local model. |
-| [Operations](docs/operations.md) | Install by hand, logs, metrics, privacy, local failures and troubleshooting. |
-| [Development](docs/development.md) | Build, test, project layout and releases. |
-| [Architecture decisions](docs/adr) | The significant decisions and their reasons. |
+| [Architecture](docs/architecture.md) | Architecture diagram, layers, component interactions and data flow. |
 | [CHANGELOG.md](CHANGELOG.md) | The changes in each release. |
 
 ## License

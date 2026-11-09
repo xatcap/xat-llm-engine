@@ -523,20 +523,6 @@ public class ApiTests
         Assert.Null(engine.Provider.LastRequest);
     }
 
-    /// <summary>Tool content inside a message gets 400 through the API, and the provider is not called.</summary>
-    /// <returns>A task for the test.</returns>
-    [Fact]
-    public async Task Chat_ToolMessage_Returns400()
-    {
-        await using var engine = new EngineFactory();
-
-        using var response = await PostAsync(engine, """{"model":"fake/model-a","messages":[{"role":"tool","tool_call_id":"1","content":"42"}]}""");
-
-        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
-        await AssertErrorFormatAsync(response, "invalid_request_error");
-        Assert.Null(engine.Provider.LastRequest);
-    }
-
     /// <summary>Every response has a request ID, for a success, an error and an unknown route, so that a caller can report a problem.</summary>
     /// <param name="path">The route.</param>
     /// <param name="body">The request body, or <see langword="null"/> for a GET request.</param>
@@ -557,90 +543,6 @@ public class ApiTests
 
         Assert.True(response.Headers.TryGetValues("X-Request-Id", out var values));
         Assert.False(string.IsNullOrWhiteSpace(Assert.Single(values)));
-    }
-
-    /// <summary>A provider that has used its budget gets 429 with a wait, also after an engine restart. The health route reports it.</summary>
-    /// <returns>A task for the test.</returns>
-    [Fact]
-    public async Task Chat_BudgetUsedUp_Returns429AfterRestart()
-    {
-        var folder = Directory.CreateTempSubdirectory("xat-engine-test-").FullName;
-        try
-        {
-            await using (var engine = new EngineFactory(dataFolder: folder))
-            {
-                // Each answer of the fake provider uses 5 tokens.
-                engine.Provider.Budget = new TokenBudget(10, TimeSpan.FromHours(24));
-                using var first = await PostAsync(engine, ValidBody);
-                using var second = await PostAsync(engine, ValidBody);
-                using var refused = await PostAsync(engine, ValidBody);
-
-                Assert.Equal(HttpStatusCode.OK, second.StatusCode);
-                Assert.Equal(HttpStatusCode.TooManyRequests, refused.StatusCode);
-                await AssertErrorFormatAsync(refused, "budget_exceeded_error");
-                Assert.True(refused.Headers.RetryAfter!.Delta > TimeSpan.FromHours(23));
-            }
-
-            await using var restarted = new EngineFactory(dataFolder: folder);
-            restarted.Provider.Budget = new TokenBudget(10, TimeSpan.FromHours(24));
-            using var afterRestart = await PostAsync(restarted, ValidBody);
-            using var client = restarted.CreateClient();
-            using var health = await client.GetAsync(new Uri("/health/ready?provider=fake", UriKind.Relative), TestContext.Current.CancellationToken);
-
-            Assert.Equal(HttpStatusCode.TooManyRequests, afterRestart.StatusCode);
-            Assert.Equal(HttpStatusCode.ServiceUnavailable, health.StatusCode);
-            using var healthBody = await ReadJsonAsync(health);
-            var fake = healthBody.RootElement.GetProperty("providers").EnumerateArray().Single(entry => entry.GetProperty("name").GetString() == "fake");
-            Assert.Equal("budget_exhausted", fake.GetProperty("state").GetString());
-            Assert.True(fake.GetProperty("budget").GetProperty("available_at").GetDateTimeOffset() > DateTimeOffset.UtcNow.AddHours(23));
-        }
-        finally
-        {
-            Directory.Delete(folder, recursive: true);
-        }
-    }
-
-    /// <summary>The health route gives the budget use of a provider with a budget, in snake_case, and no budget object for the local model.</summary>
-    /// <returns>A task for the test.</returns>
-    [Fact]
-    public async Task Health_ProviderWithBudget_GivesUse()
-    {
-        await using var engine = new EngineFactory();
-        engine.Provider.Budget = new TokenBudget(100, TimeSpan.FromHours(24));
-        using var answered = await PostAsync(engine, ValidBody);
-        using var client = engine.CreateClient();
-
-        using var response = await client.GetAsync(new Uri("/health", UriKind.Relative), TestContext.Current.CancellationToken);
-
-        using var body = await ReadJsonAsync(response);
-        var providers = body.RootElement.GetProperty("providers").EnumerateArray().ToList();
-        var budget = providers.Single(entry => entry.GetProperty("name").GetString() == "fake").GetProperty("budget");
-        Assert.Equal(5, budget.GetProperty("used").GetInt64());
-        Assert.Equal(100, budget.GetProperty("limit").GetInt64());
-        Assert.Equal(24, budget.GetProperty("period_hours").GetDouble());
-        Assert.False(budget.TryGetProperty("available_at", out _));
-        Assert.False(providers.Single(entry => entry.GetProperty("name").GetString() == "local").TryGetProperty("budget", out _));
-    }
-
-    /// <summary>A portable request reaches a Mistral-like provider with its native names, and two names for one setting get 400. See ADR 0012.</summary>
-    /// <returns>A task for the test.</returns>
-    [Fact]
-    public async Task Chat_PortableFields_AreRenamedEndToEnd()
-    {
-        await using var engine = new EngineFactory();
-        engine.Provider.AcceptsPortableFields = true;
-        engine.Provider.RequestFields = ["messages", "max_tokens", "random_seed"];
-
-        using var portable = await PostAsync(engine, """{"model":"fake/model-a","messages":[{"role":"user","content":"Hi"}],"max_completion_tokens":20,"seed":3}""");
-        var sent = engine.Provider.LastRequest!.Body;
-        using var conflict = await PostAsync(engine, """{"model":"fake/model-a","messages":[],"seed":3,"random_seed":3}""");
-
-        Assert.Equal(HttpStatusCode.OK, portable.StatusCode);
-        Assert.Equal(20, sent["max_tokens"]!.GetValue<int>());
-        Assert.Equal(3, sent["random_seed"]!.GetValue<int>());
-        Assert.False(sent.ContainsKey("seed"));
-        Assert.Equal(HttpStatusCode.BadRequest, conflict.StatusCode);
-        await AssertErrorFormatAsync(conflict, "invalid_request_error");
     }
 
     /// <summary>Posts a chat request.</summary>

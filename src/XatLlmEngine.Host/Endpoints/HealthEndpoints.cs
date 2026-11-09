@@ -66,7 +66,6 @@ internal static class HealthEndpoints
     private static ProviderHealthResponse ToBody(ProviderHealth provider)
     {
         var load = provider.Status.Load;
-        var budget = provider.Budget is { } use ? new BudgetResponse(use.Used, use.Limit, use.Period.TotalHours, use.AvailableAt) : null;
         return new ProviderHealthResponse(
             provider.Name,
             ToWire(provider.Status.State),
@@ -74,8 +73,7 @@ internal static class HealthEndpoints
             load?.Active,
             load?.Queued,
             load?.Capacity,
-            load?.QueueLimit,
-            budget);
+            load?.QueueLimit);
     }
 
     /// <summary>Converts the overall health to its public value. These values are part of the API, so they never come from enum names.</summary>
@@ -102,7 +100,6 @@ internal static class HealthEndpoints
         ProviderState.Failed => "failed",
         ProviderState.Stopping => "stopping",
         ProviderState.Disabled => "disabled",
-        ProviderState.BudgetExhausted => "budget_exhausted",
     };
 
     /// <summary>Explains a provider state.</summary>
@@ -122,7 +119,6 @@ internal static class HealthEndpoints
         (false, ProviderState.Ready) => $"The provider '{name}' is enabled. The engine does not test cloud providers.",
         (false, ProviderState.Disabled) => $"The provider '{name}' has no API key, so it is turned off.",
         (_, ProviderState.Stopping) => "The engine is stopping.",
-        (_, ProviderState.BudgetExhausted) => $"The provider '{name}' has used its token budget. Requests return 429 until the use drops below the budget.",
         (false, _) => $"The provider '{name}' cannot take requests now.",
     };
 }

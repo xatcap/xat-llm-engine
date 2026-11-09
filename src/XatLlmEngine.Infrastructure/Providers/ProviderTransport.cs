@@ -29,7 +29,7 @@ internal enum ProviderKind
 /// <param name="ReadIdleTimeout">How long one read of the response body can wait for data, or <see langword="null"/> for no limit.</param>
 internal sealed record TransportSettings(string ProviderName, ProviderKind Kind, string HttpClientName, TimeSpan? RequestTimeout, TimeSpan? ReadIdleTimeout);
 
-/// <summary>Sends requests to a provider and translates every transport failure into an engine error. Both protocols use this class.</summary>
+/// <summary>Sends requests to a provider and translates every transport failure into an engine error.</summary>
 /// <remarks>The engine never retries a request. See ADR 0006.</remarks>
 /// <param name="settings">The transport settings.</param>
 /// <param name="httpClientFactory">Creates HTTP clients, so that the connection pool works correctly.</param>
@@ -46,9 +46,6 @@ internal sealed partial class ProviderTransport(
 
     /// <summary>The largest error body that the engine reads. The engine needs only the message from it.</summary>
     internal const int MaxErrorBodyBytes = 64 * 1024;
-
-    /// <summary>Gets the provider's name.</summary>
-    public string ProviderName => settings.ProviderName;
 
     /// <summary>Sends a request for a complete answer, and reads the JSON answer.</summary>
     /// <typeparam name="TBody">The wire type of the answer.</typeparam>

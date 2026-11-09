@@ -1,32 +1,23 @@
 # API reference
 
-This page is for programs that call the engine. The engine listens at `http://127.0.0.1:8420` by default. An app that includes the engine can let the system choose the port. See [Include the engine in an app](embedding.md). The [README](../README.md#quick-start) has an example request.
+This page is for programs that call the engine. The engine listens at `http://127.0.0.1:8420` by default. See [Quick start](quickstart.md) to start the engine and send a first request.
 
 ## How it works
 
-- Callers send plain HTTP requests, or use a client library.
-- The model name selects the provider, for example `local/ministral-3-3b` or `anthropic/claude-sonnet-5-5`.
+- Callers send plain HTTP requests, or use an OpenAI client library.
+- The model name selects the provider, for example `local/ministral-3-3b` or `openai/gpt-4o-mini`.
 - Each provider has its own request template, in that provider's native format. See [Request templates](#request-templates).
-- Providers that use the OpenAI format also accept the portable fields. With only portable fields, a caller changes only `model` to move between `local`, `openai` and `mistral`. See [Portable fields](#portable-fields).
 - Every provider returns the same OpenAI-style response format, the same errors and the same health values.
 - Local requests go to a [llama.cpp](https://github.com/ggml-org/llama.cpp) `llama-server` process. The engine starts and supervises this process.
 - Cloud requests go directly to the vendor's API.
 
 ### Client libraries
 
-OpenAI client libraries work for these OpenAI-format providers, with the same arguments for each one:
+OpenAI client libraries work for these providers, with the fields in each provider's template:
 
 - `local`
 - `openai`
 - `mistral`
-
-They do not work for `anthropic/...`, which uses Anthropic's own format. Send Anthropic requests as plain HTTP:
-
-```bash
-curl http://127.0.0.1:8420/v1/chat/completions \
-  -H "Content-Type: application/json" \
-  -d '{"model":"anthropic/claude-sonnet-5-5","system":"Answer in one sentence.","max_tokens":256,"messages":[{"role":"user","content":"Hello"}]}'
-```
 
 This example streams an answer from the local model with the OpenAI client library for Python:
 
@@ -49,84 +40,83 @@ for chunk in client.chat.completions.create(
 |---|---|
 | `POST /v1/chat/completions` | Chat, with or without streaming. The accepted fields depend on the provider. See [Request templates](#request-templates). |
 | `GET /v1/models` | Lists the configured models as `provider/model`. |
-| `GET /health` | Always 200. Returns `status` (`healthy`, `degraded` or `unhealthy`), `version`, and `providers`: the `name`, `state` and `message` of each configured provider. For `local`, it also returns `active`, `queued`, `capacity` and `queue_limit`. For a provider with a token budget, it also returns `budget`. The older fields `local` and `message` describe the local model. |
+| `GET /health` | Always 200. Returns `status` (`healthy`, `degraded` or `unhealthy`), `version`, and `providers`: the `name`, `state` and `message` of each configured provider. For `local`, it also returns `active`, `queued`, `capacity` and `queue_limit`. The older fields `local` and `message` describe the local model. |
 | `GET /health/live` | 200 while the engine runs. |
 | `GET /health/ready` | 200 when at least one provider can take requests, otherwise 503. Add `?provider=local` to ask about one provider. |
-| `GET /swagger` | Swagger UI. Development only. See [Debug with Swagger](development.md#debug-with-swagger). |
+| `GET /swagger` | Swagger UI. Development only. |
 | `GET /openapi/v1.json` | The OpenAPI document. Development only. The same document is in [openapi.json](openapi.json), and each release attaches it. |
+
+Every response includes an `X-Request-Id` header. Every log line of that request holds the same value as `RequestId`.
 
 ## Request templates
 
-Each provider accepts the fields in its template. Providers that use the OpenAI format also accept the [portable fields](#portable-fields), and the engine renames them to the names of the template. The engine forwards the values unchanged. It checks the token field, and `stream_options` for a template that has none. For other fields, a bad value returns the vendor's own 400 message. This section is the contract for the values that the engine adds.
+Each provider accepts the fields in its template. The engine forwards the values unchanged. It checks the token field when the provider has a `MaxTokensLimit`. For other fields, a bad value returns the vendor's own 400 message. This section is the contract for the values that the engine adds.
 
 | Provider | Accepted fields |
 |---|---|
 | `local` | `messages`, `temperature`, `top_p`, `max_tokens`, `stop`, `stream_options`, `top_k`, `min_p`, `repeat_penalty`, `seed`, `frequency_penalty`, `presence_penalty`, `response_format`, `grammar` |
-| `anthropic` | `messages`, `system`, `max_tokens`, `temperature`, `top_p`, `top_k`, `stop_sequences`, `metadata` |
 | `openai` | `messages`, `temperature`, `top_p`, `max_completion_tokens`, `stop`, `stream_options`, `seed`, `frequency_penalty`, `presence_penalty`, `response_format`, `reasoning_effort`, `user` |
 | `mistral` | `messages`, `temperature`, `top_p`, `max_tokens`, `stop`, `random_seed`, `safe_prompt`, `frequency_penalty`, `presence_penalty`, `response_format` |
 
 These rules apply to every provider:
 
 - `model` and `stream` are always accepted.
-- Any other top-level field that the template does not list, and that is not a portable field, returns a 400 error. The error names the field and lists the accepted fields. This happens even when the field's value is `null` or a default.
+- Any other top-level field that the template does not list returns a 400 error. The error names the field and lists the accepted fields. This happens even when the field's value is `null` or a default.
 - The local model uses `LocalModel__DefaultTemperature` when a request sends no `temperature`.
-- A provider with a `MaxTokensLimit` refuses a token value above the limit. It also refuses a token value that is not a number, or that is not a whole number of at least 1. These checks return a 400 error. A request with no token field gets the limit. The token field is the first of `max_tokens` and `max_completion_tokens` in the template. Anthropic requires a limit. Its default is 4096.
+- A provider with a `MaxTokensLimit` refuses a token value above the limit. It also refuses a token value that is not a number, or that is not a whole number of at least 1. These checks return a 400 error. A request with no token field gets the limit. The token field is the first of `max_tokens` and `max_completion_tokens` in the template.
 
 Streaming usage depends on the provider:
 
-- An OpenAI-format provider whose template lists `stream_options` sends a usage piece only when it is asked for one. The engine always asks for the counts, because the budget and the metrics need them. It gives the counts to the caller only when the caller sets `stream_options.include_usage`.
-- Mistral's template has no `stream_options`. The engine gives Mistral's counts to the caller when Mistral sends them, unless the caller sets `stream_options.include_usage` to `false`.
-- Anthropic streams always end with a usage piece. Its `choices` is empty.
+- A provider whose template lists `stream_options` sends a usage piece only when it is asked for one. The engine always asks for the counts, because the metrics and the logs use them. It gives the counts to the caller only when the caller sets `stream_options.include_usage` to `true`.
+- Mistral's template has no `stream_options`. The engine gives Mistral's counts to the caller when Mistral sends them.
 
-To change a template, edit `RequestFields`. See [Configuration](configuration.md#request-fields).
-
-## Portable fields
-
-The local model and every provider with `Type: OpenAiCompatible` accept the portable fields. A body with only portable fields works for all of them. Change only `model`.
-
-| Portable field | `local` | `openai` | `mistral` |
-|---|---|---|---|
-| `messages`, `temperature`, `top_p`, `stop`, `frequency_penalty`, `presence_penalty`, `response_format` | the same | the same | the same |
-| `max_tokens` | `max_tokens` | `max_completion_tokens` | `max_tokens` |
-| `max_completion_tokens` | `max_tokens` | `max_completion_tokens` | `max_tokens` |
-| `seed` | `seed` | `seed` | `random_seed` |
-| `stream_options` | the same | the same | removed. See below. |
-
-These rules apply:
-
-- The engine renames a portable field to the name in the provider's template. It never changes a value.
-- The native names also work, with no change. For example, `random_seed` still works for `mistral`.
-- Two names for one setting in one request return a 400 error. An example is `seed` and `random_seed` to `mistral`.
-- The token limit applies after the rename. Its errors name the field that you sent.
-- For `mistral`, `stream_options` can hold only `include_usage`. Other content returns a 400 error.
-  - The engine removes the field from the request, because Mistral does not accept it.
-  - With `include_usage` set to `false`, you get no token counts in a stream.
-  - With `true`, or with no `stream_options`, you get the counts that Mistral sends. The engine cannot make a provider send counts.
-- A field that is not portable works only with the providers that list it, for example `grammar`, `reasoning_effort` and `safe_prompt`. Other providers return a 400 error that says that the field is not portable.
-- Anthropic does not rename the portable fields. A portable name works there only when its template lists it, such as `messages`, `temperature`, `top_p` or `max_tokens`. Other portable names return a 400 error. Use Anthropic's own template.
-
-> [!NOTE]
->
-> Portable means the same names, not the same results. Each vendor has its own value ranges and defaults. For example, the local model uses a default temperature of 0.07, and the cloud vendors use their own default. A `seed` does not give the same text on two providers. For a portable body, use only the `text` and `json_object` types of `response_format`. Other types depend on the vendor, and the engine does not check them. On OpenAI reasoning models, `max_completion_tokens` also counts the reasoning tokens, so a low limit can give an empty answer.
-
-[ADR 0012](adr/0012-portable-fields.md) describes the rules.
+To change a template, edit `RequestFields` in `appsettings.json` or in environment variables.
 
 ## Content rules
 
-Answers are text only. `tools` and `n` are not in any template, because the unified response carries one text answer. The engine also refuses tool content inside `messages` with a 400 error. Tool content is one of these:
+Answers are text only. `tools` and `n` are not in the default templates, because the unified response carries one text answer.
 
-- A message with the role `tool` or `function`.
-- A message with the field `tool_calls` or `function_call`.
-- A content block such as `tool_use` or `tool_result`.
-
-The engine forwards images in messages to the provider unchanged. The vendor and the model decide whether images work.
+The engine does not inspect the items inside `messages`. It forwards `messages`, including images, to the provider unchanged. The vendor and the model decide what content works.
 
 If a model sends reasoning output in a separate field, the engine removes that output. The engine keeps the text of the answer.
 
-## Streams
+## Responses
 
-The engine reads the first piece of a stream before it sends status 200. Most failures before the first piece still get a real status code. When the first piece takes longer than `Api__StreamCommitSeconds` (15 by default), the engine sends status 200. It then sends a `: keep-alive` comment every 15 seconds. These comments stop the caller's read time limit from ending. A failure after status 200 ends the stream with an `error` event. The stream has no `[DONE]` marker in that case. [ADR 0008](adr/0008-streaming-contract.md) describes the stream rules.
+### Complete answers
+
+When `stream` is `false` or absent, `POST /v1/chat/completions` returns `application/json`:
+
+```json
+{
+  "id": "chatcmpl-0123456789abcdef0123456789abcdef",
+  "object": "chat.completion",
+  "created": 1762700000,
+  "model": "local/ministral-3-3b",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "Hello!"
+      },
+      "finish_reason": "stop"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 10,
+    "completion_tokens": 2,
+    "total_tokens": 12
+  }
+}
+```
+
+`finish_reason` is `stop`, `length` or `content_filter`. `usage` is present when the provider reported token counts.
+
+### Streams
+
+When `stream` is `true`, `POST /v1/chat/completions` returns `text/event-stream`. Each event is a JSON `chat.completion.chunk` object, and the stream ends with `data: [DONE]`.
+
+The engine reads the first piece of a stream before it sends status 200. Most failures before the first piece still get a real status code. When the first piece takes longer than `Api__StreamCommitSeconds` (15 by default), the engine sends status 200. It then sends a `: keep-alive` comment every 15 seconds. These comments stop the caller's read time limit from ending. A failure after status 200 ends the stream with an `error` event. The stream has no `[DONE]` marker in that case.
 
 ## Errors
 
@@ -139,8 +129,8 @@ All errors use the body `{"error":{"message","type"}}`. There is one exception. 
 | 405 | `invalid_request_error` | The route exists, but does not accept this HTTP method. |
 | 413 | `invalid_request_error` | The request body is larger than `Api:MaxRequestBodyBytes`. |
 | 415 | `invalid_request_error` | The `Content-Type` is not `application/json`. |
-| 429 | `rate_limit_error`, or `budget_exceeded_error` | The provider is rate limiting, or it has used its token budget. See `Retry-After`. |
-| 500 | `internal_error` | An unexpected fault in the engine. Report it, with the time of the request. The engine log has the cause. |
+| 429 | `rate_limit_error` | The provider is rate limiting. See `Retry-After`. |
+| 500 | `internal_error` | An unexpected fault in the engine. Report it, with the `X-Request-Id` header of the response. The engine log has the cause. |
 | 502 | `upstream_error` | The provider failed, and a retry does not help. For the local model, the model is not installed, `llama-server` could not start, or it stopped too often. The message gives the cause, and the engine log has the details. |
 | 503 | `service_unavailable_error`, or `overloaded_error` | The provider cannot take requests now, or the local model cannot take them yet. See `Retry-After`. |
 
@@ -152,8 +142,6 @@ A 503 response has the type `overloaded_error` when the local queue is full. Oth
 - The connection to the provider broke.
 - The provider stopped sending data.
 
-[ADR 0007](adr/0007-error-model-and-status-codes.md) describes the status codes and error types.
-
 ### Retry-After
 
 The engine never retries a request, so one request to the engine is at most one request to the provider. The caller decides whether to try again. When the provider sends its own `Retry-After` header, the engine uses that wait, with these limits:
@@ -162,7 +150,7 @@ The engine never retries a request, so one request to the engine is at most one 
 - The wait is rounded up to whole seconds.
 - The wait is at least 1 second.
 
-If the provider sends no header, or the engine returns the 503 itself, the value is 5 seconds. A used token budget sends the time until enough tokens leave the budget period. [ADR 0006](adr/0006-no-retries-and-time-limits.md) describes the rules.
+If the provider sends no header, or the engine returns the 503 itself, the value is 5 seconds.
 
 ## Health
 
@@ -177,22 +165,8 @@ The provider states are:
 - `failed`
 - `stopping`
 - `disabled`
-- `budget_exhausted`
 
-A provider with a token budget also has a `budget` object:
-
-```json
-{"name":"anthropic","state":"ready","message":"...","budget":{"used":12345,"limit":100000,"period_hours":24}}
-```
-
-- `used` is the number of tokens, input and output together, in the rolling period before now.
-- `limit` is the token budget of the period.
-- `period_hours` is the length of the period.
-- `available_at` is present only when the state is `budget_exhausted`. It is the time when requests can continue.
-
-Use `budget` to warn your users before the budget is used up.
-
-A provider can take requests only when it is `ready` or `busy`. The engine does not test cloud providers. So an enabled cloud provider is `ready`. Accept values that you do not know. A later version can add values. [ADR 0010](adr/0010-health-contract.md) describes the health contract.
+A provider can take requests only when it is `ready` or `busy`. The engine does not test cloud providers. So an enabled cloud provider is `ready`. Accept values that you do not know. A later version can add values.
 
 ## Compatibility
 
@@ -205,7 +179,7 @@ The engine follows Semantic Versioning. These items are part of the contract:
 - the settings, and
 - the fields of the ready file.
 
-A breaking change to one of these needs a new major version. Before a removal, the engine marks the item as deprecated for at least one minor version, and the [CHANGELOG](../CHANGELOG.md) tells what to use in its place. Accept fields and values that you do not know, because a minor version can add them. [ADR 0005](adr/0005-versioning-policy.md) describes the rules.
+A breaking change to one of these needs a new major version. Before a removal, the engine marks the item as deprecated for at least one minor version, and the [CHANGELOG](../CHANGELOG.md) tells what to use in its place. Accept fields and values that you do not know, because a minor version can add them.
 
 ## Supported models
 
@@ -218,6 +192,7 @@ Not supported on any provider:
 - Models offered only on OpenAI's `/v1/responses` API.
 - Tool calling.
 
-A cloud vendor works through configuration if it offers an OpenAI-compatible endpoint with Bearer keys. AWS Bedrock's native API does not work. Azure OpenAI's older deployment URLs, which use `api-key` headers, do not work. These statements were not tested against live vendor APIs. See [Add another provider](configuration.md#add-another-provider).
+A cloud vendor works through configuration if it offers an OpenAI-compatible endpoint with Bearer keys. AWS Bedrock's native API does not work. Azure OpenAI's older deployment URLs, which use `api-key` headers, do not work. These statements were not tested against live vendor APIs.
 
-The local model can be any GGUF model that the pinned llama.cpp supports. See [Change the local model](configuration.md#change-the-local-model).
+The local model can be any GGUF model that the pinned llama.cpp supports.
+

@@ -1,5 +1,4 @@
 using Microsoft.AspNetCore.Diagnostics;
-using Microsoft.Extensions.Options;
 using System.Text.Json.Nodes;
 using XatLlmEngine.Application;
 using XatLlmEngine.Application.Features.Providers;
@@ -77,10 +76,6 @@ var startupLogger = app.Services.GetRequiredService<ILogger<Program>>();
 // Building the registry here also stops the engine at startup when two providers have the same name.
 var enabledProviders = string.Join(", ", app.Services.GetRequiredService<ProviderRegistry>().All.Select(provider => provider.Name));
 StartupLog.EnabledProviders(startupLogger, enabledProviders);
-if (string.IsNullOrWhiteSpace(app.Services.GetRequiredService<IOptions<EngineOptions>>().Value.DataFolder))
-{
-    StartupLog.DefaultDataFolder(startupLogger);
-}
 
 await app.RunAsync().ConfigureAwait(false);
 

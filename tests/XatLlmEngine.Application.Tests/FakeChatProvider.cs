@@ -20,13 +20,7 @@ internal sealed class FakeChatProvider(string name) : IChatProvider
     public ProviderStatus Status { get; init; } = ProviderStatus.Ready;
 
     /// <inheritdoc/>
-    public bool AcceptsPortableFields { get; init; }
-
-    /// <inheritdoc/>
     public int MaxTokensLimit { get; init; }
-
-    /// <inheritdoc/>
-    public TokenBudget? Budget { get; init; }
 
     /// <summary>Gets the most recent request.</summary>
     public ChatRequest? LastRequest { get; private set; }

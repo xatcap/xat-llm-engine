@@ -44,7 +44,7 @@ public sealed class EngineTelemetry : IDisposable
         requests = meter.CreateCounter<long>("xat_engine.chat.requests", "{request}", "Chat requests, by provider, model, stream and outcome.");
         duration = meter.CreateHistogram<double>("xat_engine.chat.duration", "s", "The time of a whole chat request.");
         firstChunk = meter.CreateHistogram<double>("xat_engine.chat.time_to_first_chunk", "s", "The time until the first piece of a stream.");
-        tokens = meter.CreateCounter<long>("xat_engine.tokens", "{token}", "Tokens, by provider, model, direction and source: reported by the provider, or estimated by the engine.");
+        tokens = meter.CreateCounter<long>("xat_engine.tokens", "{token}", "Tokens, by provider, model and direction.");
     }
 
     /// <summary>Gets telemetry that nothing collects, for code that runs without a host.</summary>
@@ -54,19 +54,14 @@ public sealed class EngineTelemetry : IDisposable
     /// <param name="provider">The selected provider.</param>
     /// <param name="model">The model name inside the provider.</param>
     /// <param name="stream">Whether the request asks for a stream.</param>
-    /// <param name="renamedFields">The renamed portable fields, with names only, or <see langword="null"/> when nothing changed.</param>
     /// <returns>The measurement. Record its end once.</returns>
-    internal ChatMeasurement Start(IChatProvider provider, string model, bool stream, string? renamedFields = null)
+    internal ChatMeasurement Start(IChatProvider provider, string model, bool stream)
     {
         var modelTag = provider.Models.Contains(model, StringComparer.Ordinal) ? model : OtherModel;
         var activity = Source.StartActivity("chat", ActivityKind.Internal);
         activity?.SetTag("xat_engine.provider", provider.Name);
         activity?.SetTag("xat_engine.model", modelTag);
         activity?.SetTag("xat_engine.stream", stream);
-        if (renamedFields is not null)
-        {
-            activity?.SetTag("xat_engine.renamed_fields", renamedFields);
-        }
         return new ChatMeasurement(this, provider.Name, modelTag, stream, activity);
     }
 
@@ -84,7 +79,6 @@ public sealed class EngineTelemetry : IDisposable
         ErrorKind.Unavailable => "unavailable",
         ErrorKind.Upstream => "upstream",
         ErrorKind.Overloaded => "overloaded",
-        ErrorKind.BudgetExceeded => "budget_exceeded",
     };
 
     /// <summary>The measurement of one chat request.</summary>
@@ -124,22 +118,19 @@ public sealed class EngineTelemetry : IDisposable
         /// <summary>Records the end of the request. Only the first call has an effect.</summary>
         /// <param name="failure">The failure, or <see langword="null"/> for a success.</param>
         /// <param name="usage">The token counts, if any.</param>
-        /// <param name="estimated">Whether the engine estimated the counts, because the provider did not report them.</param>
-        public void Finish(ErrorKind? failure, TokenUsage? usage, bool estimated = false) => Finish(Outcome(failure), usage, estimated);
+        public void Finish(ErrorKind? failure, TokenUsage? usage) => Finish(Outcome(failure), usage);
 
         /// <summary>Records a request that the caller canceled, for example by a disconnect.</summary>
         /// <param name="usage">The token counts, if any.</param>
-        /// <param name="estimated">Whether the engine estimated the counts.</param>
-        public void Cancel(TokenUsage? usage = null, bool estimated = false) => Finish("canceled", usage, estimated);
+        public void Cancel(TokenUsage? usage = null) => Finish("canceled", usage);
 
         /// <summary>Records a request that failed with an unexpected exception.</summary>
-        public void Crash() => Finish("error", usage: null, estimated: false);
+        public void Crash() => Finish("error", usage: null);
 
         /// <summary>Records the end of the request. Only the first call has an effect.</summary>
         /// <param name="outcome">The outcome tag.</param>
         /// <param name="usage">The token counts, if any.</param>
-        /// <param name="estimated">Whether the engine estimated the counts.</param>
-        private void Finish(string outcome, TokenUsage? usage, bool estimated)
+        private void Finish(string outcome, TokenUsage? usage)
         {
             if (Interlocked.Exchange(ref finished, 1) == 1)
             {
@@ -152,14 +143,11 @@ public sealed class EngineTelemetry : IDisposable
             owner.duration.Record(Stopwatch.GetElapsedTime(started).TotalSeconds, withOutcome);
             if (usage is not null)
             {
-                var source = estimated ? "estimated" : "reported";
                 var input = tags;
                 input.Add("direction", "input");
-                input.Add("source", source);
                 owner.tokens.Add(usage.InputTokens, input);
                 var output = tags;
                 output.Add("direction", "output");
-                output.Add("source", source);
                 owner.tokens.Add(usage.OutputTokens, output);
             }
 

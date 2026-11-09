@@ -8,7 +8,7 @@ namespace XatLlmEngine.Infrastructure.Providers;
 /// <summary>Translates failed provider responses into engine errors (anti-corruption layer).</summary>
 internal static partial class HttpFailure
 {
-    /// <summary>Anthropic's non-standard status for "the API is temporarily overloaded".</summary>
+    /// <summary>A non-standard status for "the API is temporarily overloaded".</summary>
     private const int Overloaded = 529;
 
     /// <summary>The longest Retry-After wait that the engine gives to the caller. Without this limit, a provider could ask callers to wait for hours.</summary>

@@ -1,16 +1,31 @@
 # Changelog
 
-This file records the changes in each release. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). The version numbers follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html), as [ADR 0005](docs/adr/0005-versioning-policy.md) describes.
+This file records the changes in each release. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). The version numbers follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 The release workflow uses the section of each version as its release notes. Write each entry for the people who use the engine, and mark each breaking change with **Breaking**.
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking:** The engine no longer inspects `messages` for tool roles, `tool_calls` or tool content blocks. It checks only the top-level request fields against the provider's `RequestFields` template and forwards `messages` unchanged.
+
+### Removed
+
+- **Breaking:** The built-in `Anthropic` provider type and the default `anthropic` provider in `appsettings.json`. Only the `local` provider and `OpenAiCompatible` cloud providers remain.
+- **Breaking:** Portable field renaming across providers and the `xat_engine.renamed_fields` trace tag. Each provider accepts only `model`, `stream` and the fields in its `RequestFields` template.
+- **Breaking:** Rolling token budgets and the `usage.json` ledger:
+  - `Providers:<name>:TokenBudget` and `BudgetPeriodHours`,
+  - the `budget_exceeded_error` error type,
+  - the `budget_exhausted` provider state and the `budget` object in `/health`, and
+  - the `source` tag on the `xat_engine.tokens` metric.
+  Per-request `MaxTokensLimit` remains.
+
 ## [1.0.2] - 2026-11-06
 
 ### Added
 
-- Support for apps that include the engine. See `docs/embedding.md`.
+- Support for apps that include the engine.
   - `Engine:ReadyFile`. When the API starts, the engine writes its address, its process ID and its version to this file. It deletes the file when it stops, and removes an old file when it starts. A folder that does not exist stops the engine at startup.
   - `Engine:StopWhenInputCloses` (default `false`). The engine stops when its standard input closes, also when the parent app stops unexpectedly.
   - `Urls=http://127.0.0.1:0` lets the system choose a free port. The engine refuses `localhost` with port 0, because the server cannot use it.
@@ -18,9 +33,8 @@ The release workflow uses the section of each version as its release notes. Writ
   - The engine logs a warning when `Engine:DataFolder` is empty, because an app update to a new folder then starts the token budgets again from zero.
 - `/health` gives a `budget` object for each provider with a token budget: `used`, `limit`, `period_hours`, and `available_at` when the budget is used up.
 - `docs/openapi.json` is the API document of the code, and each release attaches it with the release version. A test fails when the code and the file are different.
-- A deprecation rule: a deprecated item stays for at least one minor version before a removal. See ADR 0005.
-- A privacy section in `docs/operations.md`.
-- Portable fields for the local model and every OpenAI-format provider. One body works for `local`, `openai` and `mistral`, so a caller changes only `model`. The engine renames a portable field to the provider's native name. For example, `seed` becomes `random_seed` for Mistral, and `max_tokens` becomes `max_completion_tokens` for OpenAI. The engine never changes a value. Native names still work. See ADR 0012 and "Portable fields" in `docs/api.md`.
+- A deprecation rule: a deprecated item stays for at least one minor version before a removal.
+- Portable fields for the local model and every OpenAI-format provider. One body works for `local`, `openai` and `mistral`, so a caller changes only `model`. The engine renames a portable field to the provider's native name. For example, `seed` becomes `random_seed` for Mistral, and `max_tokens` becomes `max_completion_tokens` for OpenAI. The engine never changes a value. Native names still work. See "Portable fields" in `docs/api.md`.
   - Two names for one setting in one request return 400.
   - Mistral accepts `stream_options` with only `include_usage`. The engine removes the field, and holds back the token counts when `include_usage` is `false`.
   - A token limit error names the field that the caller sent.
@@ -36,7 +50,6 @@ The release workflow uses the section of each version as its release notes. Writ
   - tokens,
   - `llama-server` restarts, and
   - the local queue.
-  See "Monitor" in `docs/operations.md`.
 - The `X-Request-Id` response header. Every log line of a request holds the same ID. Each chat request writes one log line. The line holds these values:
   - the model,
   - the status,

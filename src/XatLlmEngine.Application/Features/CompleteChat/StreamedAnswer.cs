@@ -1,4 +1,5 @@
 using XatLlmEngine.Application.Abstractions;
+using XatLlmEngine.Application.Diagnostics;
 using XatLlmEngine.Domain;
 
 namespace XatLlmEngine.Application.Features.CompleteChat;
@@ -17,10 +18,7 @@ public sealed class StreamedAnswer : IAsyncDisposable
     private readonly ChatChunk? first;
 
     /// <summary>Records the end of the request. The stream records it, because the request ends with the stream.</summary>
-    private readonly RequestAccounting accounting;
-
-    /// <summary>The UTF-8 bytes of the text so far, for an estimate when the provider does not report tokens.</summary>
-    private long outputBytes;
+    private readonly EngineTelemetry.ChatMeasurement measurement;
 
     /// <summary>Tells whether the end of the request is recorded.</summary>
     private bool recorded;
@@ -33,14 +31,14 @@ public sealed class StreamedAnswer : IAsyncDisposable
     /// <param name="first">The first piece.</param>
     /// <param name="model">The full <c>provider/model</c> reference.</param>
     /// <param name="forwardUsage">Whether the caller must get the token counts.</param>
-    /// <param name="accounting">Records the end of the request.</param>
-    internal StreamedAnswer(IAsyncEnumerator<ChatChunk> source, ChatChunk first, string model, bool forwardUsage, RequestAccounting accounting)
+    /// <param name="measurement">Records the end of the request.</param>
+    internal StreamedAnswer(IAsyncEnumerator<ChatChunk> source, ChatChunk first, string model, bool forwardUsage, EngineTelemetry.ChatMeasurement measurement)
     {
         this.source = source;
         this.first = first;
         Model = model;
         ForwardUsage = forwardUsage;
-        this.accounting = accounting;
+        this.measurement = measurement;
     }
 
     /// <summary>Gets the full <c>provider/model</c> reference to report back to the caller.</summary>
@@ -68,7 +66,6 @@ public sealed class StreamedAnswer : IAsyncDisposable
         for (var chunk = first; chunk is not null; chunk = await NextAsync().ConfigureAwait(false))
         {
             Usage = chunk.Usage ?? Usage;
-            outputBytes += chunk.Content is null ? 0 : System.Text.Encoding.UTF8.GetByteCount(chunk.Content);
             if (chunk.Content is not null || chunk.FinishReason is not null)
             {
                 finished |= chunk.FinishReason is not null;
@@ -91,7 +88,7 @@ public sealed class StreamedAnswer : IAsyncDisposable
         if (!recorded)
         {
             recorded = true;
-            accounting.Canceled(Usage, outputBytes);
+            measurement.Cancel(Usage);
         }
 
         await source.DisposeAsync().ConfigureAwait(false);
@@ -113,7 +110,7 @@ public sealed class StreamedAnswer : IAsyncDisposable
         if (!recorded)
         {
             recorded = true;
-            accounting.Answered(failure, Usage, outputBytes);
+            measurement.Finish(failure, Usage);
         }
     }
 

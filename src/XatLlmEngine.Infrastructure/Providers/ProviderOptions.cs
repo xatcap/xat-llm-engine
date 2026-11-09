@@ -29,18 +29,10 @@ public sealed class ProviderOptions
     /// <summary>
     /// Gets the largest number of output tokens that a caller can ask for, or 0 for no limit. A request that asks for more gets 400.
     /// A request with no token field gets this limit. The engine uses the first of <c>max_tokens</c> and <c>max_completion_tokens</c>
-    /// that <see cref="RequestFields"/> lists. Anthropic requires a limit on every request, so an Anthropic provider must set it.
+    /// that <see cref="RequestFields"/> lists.
     /// </summary>
     [Range(0, int.MaxValue)]
     public int MaxTokensLimit { get; init; }
-
-    /// <summary>Gets the largest number of tokens, input and output together, that this provider can use in <see cref="BudgetPeriodHours"/>, or 0 for no budget.</summary>
-    [Range(0, long.MaxValue)]
-    public long TokenBudget { get; init; }
-
-    /// <summary>Gets the length of the rolling budget period, in hours.</summary>
-    [Range(1, 744)]
-    public int BudgetPeriodHours { get; init; } = 24;
 
     /// <summary>Gets how long to wait for the start of a provider's response, in seconds. A non-streaming answer starts only when it is complete, so make this time long. The engine never retries a request.</summary>
     [Range(1, 86_400)]

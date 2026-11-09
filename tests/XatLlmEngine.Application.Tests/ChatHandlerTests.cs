@@ -148,33 +148,7 @@ public class ChatHandlerTests
         Assert.True(provider.LastRequest!.Body.ContainsKey("added"));
     }
 
-    /// <summary>Tool content inside a message is refused for every provider, before the provider is called.</summary>
-    /// <param name="message">The message JSON.</param>
-    /// <param name="expected">Text that the message must contain.</param>
-    /// <returns>A task for the test.</returns>
-    [Theory]
-    [InlineData("""{"role":"tool","tool_call_id":"1","content":"42"}""", "role 'tool'")]
-    [InlineData("""{"role":"function","name":"f","content":"42"}""", "role 'function'")]
-    [InlineData("""{"role":"assistant","content":null,"tool_calls":[{"id":"1","type":"function","function":{"name":"f","arguments":"{}"}}]}""", "field 'tool_calls'")]
-    [InlineData("""{"role":"assistant","content":null,"function_call":{"name":"f","arguments":"{}"}}""", "field 'function_call'")]
-    [InlineData("""{"role":"assistant","content":[{"type":"tool_use","id":"1","name":"f","input":{}}]}""", "type 'tool_use'")]
-    [InlineData("""{"role":"user","content":[{"type":"tool_result","tool_use_id":"1","content":"42"}]}""", "type 'tool_result'")]
-    [InlineData("""{"role":"user","content":[{"type":"web_search_tool_result","tool_use_id":"1","content":[]}]}""", "type 'web_search_tool_result'")]
-    public async Task Complete_ToolContent_FailsBeforeProvider(string message, string expected)
-    {
-        var provider = new FakeChatProvider("cloud");
-        var handler = new CompleteChatHandler(new ProviderRegistry([provider]));
-        var body = new JsonObject { ["messages"] = new JsonArray(JsonNode.Parse("""{"role":"user","content":"Hi"}"""), JsonNode.Parse(message)) };
-
-        var result = await handler.HandleAsync(new CompleteChatCommand("cloud/model", body), TestContext.Current.CancellationToken);
-
-        Assert.Equal(ErrorKind.InvalidRequest, result.Error!.Kind);
-        Assert.Contains("Message 1", result.Error.Message, StringComparison.Ordinal);
-        Assert.Contains(expected, result.Error.Message, StringComparison.Ordinal);
-        Assert.Null(provider.LastRequest);
-    }
-
-    /// <summary>Text and image content still pass, because the engine forwards images unchanged.</summary>
+    /// <summary>Text and image content pass through, because the engine forwards message content unchanged.</summary>
     /// <returns>A task for the test.</returns>
     [Fact]
     public async Task Complete_ImageContent_Passes()
@@ -188,6 +162,24 @@ public class ChatHandlerTests
         var result = await handler.HandleAsync(new CompleteChatCommand("cloud/model", body), TestContext.Current.CancellationToken);
 
         Assert.True(result.IsSuccess);
+    }
+
+    /// <summary>Tool messages and tool fields inside messages pass through, because the engine does not inspect message contents.</summary>
+    /// <returns>A task for the test.</returns>
+    [Fact]
+    public async Task Complete_ToolMessageContent_Passes()
+    {
+        var provider = new FakeChatProvider("cloud");
+        var handler = new CompleteChatHandler(new ProviderRegistry([provider]));
+        var body = new JsonObject
+        {
+            ["messages"] = JsonNode.Parse("""[{"role":"assistant","tool_calls":[{"id":"call_1","type":"function"}]},{"role":"tool","tool_call_id":"call_1","content":[{"type":"tool_result","content":"ok"}]}]"""),
+        };
+
+        var result = await handler.HandleAsync(new CompleteChatCommand("cloud/model", body), TestContext.Current.CancellationToken);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(2, provider.LastRequest!.Body["messages"]!.AsArray().Count);
     }
 
     /// <summary>Two providers with the same name stop the engine at startup.</summary>

@@ -1,10 +1,11 @@
+using System.Text.Json.Nodes;
 using XatLlmEngine.Application.Abstractions;
 using XatLlmEngine.Application.Features.Providers;
 using XatLlmEngine.Domain;
 
 namespace XatLlmEngine.Application.Features.CompleteChat;
 
-/// <summary>Selects the provider named by the model prefix, checks the request against that provider's rules, and renames portable fields.</summary>
+/// <summary>Selects the provider named by the model prefix and checks the request against that provider's rules.</summary>
 internal static class ChatRouter
 {
     /// <summary>Applies the rules for a chat request.</summary>
@@ -26,25 +27,37 @@ internal static class ChatRouter
                 $"The provider '{model.Value.Provider}' is not available. Check its name, and check that the configuration has its API key."));
         }
 
-        var fields = PortableFields.Resolve(provider, command.Body);
-        if (!fields.IsSuccess)
+        if (FindUnsupportedField(provider, command.Body) is { } unsupported)
         {
-            return Result<RoutedChat>.Fail(fields.Error);
-        }
-
-        if (MessageRules.FindToolContent(command.Body) is { } toolContent)
-        {
-            return Result<RoutedChat>.Fail(toolContent);
+            return Result<RoutedChat>.Fail(unsupported);
         }
 
         // This is the only copy. The provider owns it and can change it, so the caller's body never changes.
         var body = command.Body.DeepClone().AsObject();
-        fields.Value.ApplyTo(body);
-        if (TokenLimitPolicy.Apply(provider, body, fields.Value.SentName) is { } limitProblem)
+        if (TokenLimitPolicy.Apply(provider, body) is { } limitProblem)
         {
             return Result<RoutedChat>.Fail(limitProblem);
         }
 
-        return Result<RoutedChat>.Ok(new RoutedChat(provider, new ChatRequest(model.Value.Model, body), model.Value, fields.Value));
+        return Result<RoutedChat>.Ok(new RoutedChat(provider, new ChatRequest(model.Value.Model, body), model.Value));
+    }
+
+    /// <summary>Checks that every top-level field in the request is in the provider's template.</summary>
+    /// <param name="provider">The selected provider.</param>
+    /// <param name="body">The caller's body.</param>
+    /// <returns>The error for the first unsupported field, or <see langword="null"/> when all fields are supported.</returns>
+    private static EngineError? FindUnsupportedField(IChatProvider provider, JsonObject body)
+    {
+        foreach (var (name, _) in body)
+        {
+            if (name is not ("model" or "stream") && !provider.RequestFields.Contains(name, StringComparer.Ordinal))
+            {
+                return new EngineError(
+                    ErrorKind.InvalidRequest,
+                    $"The provider '{provider.Name}' does not support the field '{name}'. Supported fields: model, stream, {string.Join(", ", provider.RequestFields)}.");
+            }
+        }
+
+        return null;
     }
 }

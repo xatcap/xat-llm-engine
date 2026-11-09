@@ -73,9 +73,6 @@ public static class DependencyInjection
         }));
         services.AddSingleton<EngineInstanceLock>();
         services.AddHostedService(provider => provider.GetRequiredService<EngineInstanceLock>());
-        services.AddSingleton<JsonUsageLedger>();
-        services.AddSingleton<IUsageLedger>(provider => provider.GetRequiredService<JsonUsageLedger>());
-        services.AddHostedService(provider => provider.GetRequiredService<JsonUsageLedger>());
     }
 
     /// <summary>Resolves the path of the ready file. A path that cannot work stops the engine at startup, before the model loads.</summary>
@@ -167,7 +164,7 @@ public static class DependencyInjection
     }
 
     /// <summary>Adds a named HTTP client with no time limit of its own, and with redirects turned off.</summary>
-    /// <remarks>.NET removes the Authorization header on a redirect to another host, but it keeps other headers such as Anthropic's x-api-key.</remarks>
+    /// <remarks>.NET removes the Authorization header on a redirect to another host, but it keeps other headers.</remarks>
     /// <param name="services">The service collection to add to.</param>
     /// <param name="name">The client name.</param>
     private static void AddHttpClient(IServiceCollection services, string name) =>

@@ -28,38 +28,6 @@ public sealed class TelemetryTests : IDisposable
         meters.Dispose();
     }
 
-    /// <summary>The trace of a request with portable fields names the renamed and removed fields, and holds no values.</summary>
-    /// <returns>A task for the test.</returns>
-    [Fact]
-    public async Task Complete_RenamedFields_TraceHasNamesOnly()
-    {
-        // The provider name is unique, because other tests that run at the same time also start traces.
-        const string name = "trace-rename";
-        var tags = new List<string?>();
-        using var listener = new System.Diagnostics.ActivityListener
-        {
-            ShouldListenTo = source => source.Name == EngineTelemetry.Name,
-            Sample = (ref System.Diagnostics.ActivityCreationOptions<System.Diagnostics.ActivityContext> _) => System.Diagnostics.ActivitySamplingResult.AllDataAndRecorded,
-            ActivityStopped = activity =>
-            {
-                if ((string?)activity.GetTagItem("xat_engine.provider") == name)
-                {
-                    lock (tags)
-                    {
-                        tags.Add((string?)activity.GetTagItem("xat_engine.renamed_fields"));
-                    }
-                }
-            },
-        };
-        System.Diagnostics.ActivitySource.AddActivityListener(listener);
-        var provider = new FakeChatProvider(name) { AcceptsPortableFields = true, RequestFields = ["messages", "max_tokens", "random_seed"] };
-        var body = new JsonObject { ["messages"] = new JsonArray(), ["max_completion_tokens"] = 123, ["seed"] = 456, ["stream_options"] = new JsonObject { ["include_usage"] = true } };
-
-        await new CompleteChatHandler(new ProviderRegistry([provider]), telemetry: telemetry).HandleAsync(new($"{name}/m", body), TestContext.Current.CancellationToken);
-
-        Assert.Equal("max_completion_tokens>max_tokens,seed>random_seed,stream_options>(removed)", Assert.Single(tags));
-    }
-
     /// <summary>A complete request counts once, with its outcome, and its tokens count by direction.</summary>
     /// <returns>A task for the test.</returns>
     [Fact]

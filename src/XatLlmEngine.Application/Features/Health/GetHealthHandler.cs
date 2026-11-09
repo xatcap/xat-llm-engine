@@ -19,8 +19,7 @@ public enum OverallHealth
 /// <summary>The health of one provider.</summary>
 /// <param name="Name">The provider's name.</param>
 /// <param name="Status">The provider's status.</param>
-/// <param name="Budget">The token budget use, or <see langword="null"/> when no budget applies to the provider.</param>
-public sealed record ProviderHealth(string Name, ProviderStatus Status, BudgetUse? Budget = null);
+public sealed record ProviderHealth(string Name, ProviderStatus Status);
 
 /// <summary>The health of the engine and of each provider.</summary>
 /// <param name="Overall">The overall health.</param>
@@ -30,13 +29,8 @@ public sealed record EngineHealth(OverallHealth Overall, IReadOnlyList<ProviderH
 /// <summary>Builds the health of the engine. See ADR 0010.</summary>
 /// <param name="providers">The enabled providers.</param>
 /// <param name="disabled">The providers that are turned off.</param>
-/// <param name="ledger">The token use over time, or <see langword="null"/> when no budget can apply.</param>
-/// <param name="timeProvider">The clock, or <see langword="null"/> for the system clock.</param>
-public sealed class GetHealthHandler(ProviderRegistry providers, IDisabledProviders disabled, IUsageLedger? ledger = null, TimeProvider? timeProvider = null)
+public sealed class GetHealthHandler(ProviderRegistry providers, IDisabledProviders disabled)
 {
-    /// <summary>The budget rules.</summary>
-    private readonly CompleteChat.BudgetPolicy budget = new(ledger, timeProvider ?? TimeProvider.System);
-
     /// <summary>Builds the health now.</summary>
     /// <param name="stopping">Whether the engine is stopping.</param>
     /// <returns>The health.</returns>
@@ -49,18 +43,15 @@ public sealed class GetHealthHandler(ProviderRegistry providers, IDisabledProvid
         return new EngineHealth(overall, [.. enabled, .. off]);
     }
 
-    /// <summary>Gives the health of one enabled provider. A provider that has used its budget cannot take requests.</summary>
+    /// <summary>Gives the health of one enabled provider.</summary>
     /// <param name="provider">The provider.</param>
     /// <param name="stopping">Whether the engine is stopping.</param>
     /// <returns>The health.</returns>
-    private ProviderHealth HealthOf(IChatProvider provider, bool stopping)
+    private static ProviderHealth HealthOf(IChatProvider provider, bool stopping)
     {
         var status = provider.Status;
-        var use = budget.Usage(provider);
-        status = stopping ? new ProviderStatus(ProviderState.Stopping, status.Load)
-            : status.IsServing && use is { IsExhausted: true } ? status with { State = ProviderState.BudgetExhausted }
-            : status;
-        return new ProviderHealth(provider.Name, status, use);
+        status = stopping ? new ProviderStatus(ProviderState.Stopping, status.Load) : status;
+        return new ProviderHealth(provider.Name, status);
     }
 
     /// <summary>Tells whether the engine, or one provider, can take requests.</summary>

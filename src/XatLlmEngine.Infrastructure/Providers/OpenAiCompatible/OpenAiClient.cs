@@ -10,8 +10,8 @@ namespace XatLlmEngine.Infrastructure.Providers.OpenAiCompatible;
 /// <summary>Speaks the OpenAI chat completions protocol. Cloud services and the local llama-server share this code.</summary>
 /// <param name="transport">Sends the requests and translates transport failures.</param>
 /// <param name="requestStreamUsage">
-/// Whether the server accepts <c>stream_options</c>. Then the client always asks for token counts in a stream, for the budget
-/// and the metrics. The Application layer gives them to the caller only when the caller asked.
+/// Whether the server accepts <c>stream_options</c>. Then the client always asks for token counts in a stream, for the metrics
+/// and the logs. The Application layer gives them to the caller only when the caller asked.
 /// </param>
 internal sealed class OpenAiClient(ProviderTransport transport, bool requestStreamUsage = false)
 {

@@ -154,7 +154,7 @@ public class ProviderTransportTests
         Assert.Contains("Restart the engine", result.Error?.Message, StringComparison.Ordinal);
     }
 
-    /// <summary>A redirect is an error. The engine does not follow it, so a key such as x-api-key cannot go to another host.</summary>
+    /// <summary>A redirect is an error. The engine does not follow it, so an API key cannot go to another host.</summary>
     /// <returns>A task for the test.</returns>
     [Fact]
     public async Task Complete_Redirect_FailsAsUpstream()

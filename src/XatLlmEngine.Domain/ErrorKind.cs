@@ -20,7 +20,4 @@ public enum ErrorKind
 
     /// <summary>The engine's own queue for a provider is full. The caller can try again after a short wait.</summary>
     Overloaded,
-
-    /// <summary>The provider has used its token budget. The caller can try again after the wait in the error.</summary>
-    BudgetExceeded,
 }

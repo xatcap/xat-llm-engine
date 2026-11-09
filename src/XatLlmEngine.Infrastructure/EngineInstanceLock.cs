@@ -4,9 +4,9 @@ namespace XatLlmEngine.Infrastructure;
 
 /// <summary>Makes sure that only one engine runs for each install folder.</summary>
 /// <remarks>
-/// A second engine from the same folder would stop the first engine's llama-server through the shared PID file, and both
-/// would write the same usage file. The lock is an open file with no sharing. The system frees it when the process ends,
-/// also after a crash, so a killed engine leaves no stale lock.
+/// A second engine from the same folder would stop the first engine's llama-server through the shared PID file. The lock is
+/// an open file with no sharing. The system frees it when the process ends, also after a crash, so a killed engine leaves no
+/// stale lock.
 /// </remarks>
 /// <param name="dataFolder">The engine's data folder.</param>
 internal sealed class EngineInstanceLock(EngineDataFolder dataFolder) : IHostedLifecycleService, IDisposable

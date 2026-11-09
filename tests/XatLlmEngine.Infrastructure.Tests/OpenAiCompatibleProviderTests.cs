@@ -301,7 +301,7 @@ public class OpenAiCompatibleProviderTests
         Assert.True(body.RootElement.GetProperty("stream_options").GetProperty("include_usage").GetBoolean());
     }
 
-    /// <summary>When the server accepts stream_options, the client always asks for token counts, for the budget and the metrics. The caller's other stream options stay.</summary>
+    /// <summary>When the server accepts stream_options, the client always asks for token counts, for the metrics and the logs. The caller's other stream options stay.</summary>
     /// <returns>A task for the test.</returns>
     [Fact]
     public async Task Stream_ServerAcceptsStreamOptions_AsksForUsage()

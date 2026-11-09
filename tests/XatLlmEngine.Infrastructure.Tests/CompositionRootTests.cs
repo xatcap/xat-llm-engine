@@ -30,34 +30,11 @@ public class CompositionRootTests
     [Theory]
     [InlineData("OpenAiCompatible", "OpenAiCompatibleChatProvider")]
     [InlineData("openaicompatible", "OpenAiCompatibleChatProvider")]
-    [InlineData("Anthropic", "AnthropicChatProvider")]
     public void AddInfrastructure_Type_SelectsAdapter(string type, string adapter)
     {
         using var services = Build(Provider(type, ("ApiKey", "secret"), ("MaxTokensLimit", "100")));
 
         Assert.Equal(adapter, services.GetServices<IChatProvider>().Single(provider => provider.Name == "test").GetType().Name);
-    }
-
-    /// <summary>Providers that use the OpenAI format accept the portable fields. Anthropic uses its own format, so it does not. See ADR 0012.</summary>
-    /// <param name="type">The configured Type.</param>
-    /// <param name="expected">Whether the provider accepts portable fields.</param>
-    [Theory]
-    [InlineData("OpenAiCompatible", true)]
-    [InlineData("Anthropic", false)]
-    public void AddInfrastructure_Type_SetsPortableFields(string type, bool expected)
-    {
-        using var services = Build(Provider(type, ("ApiKey", "secret"), ("MaxTokensLimit", "100")));
-
-        Assert.Equal(expected, services.GetServices<IChatProvider>().Single(provider => provider.Name == "test").AcceptsPortableFields);
-    }
-
-    /// <summary>An Anthropic provider needs a token limit, because the Anthropic API requires one on every request.</summary>
-    [Fact]
-    public void AddInfrastructure_AnthropicWithoutLimit_Throws()
-    {
-        var failure = Assert.Throws<InvalidOperationException>(() => Build(Provider("Anthropic", ("ApiKey", "secret"))).Dispose());
-
-        Assert.Contains("MaxTokensLimit", failure.Message, StringComparison.Ordinal);
     }
 
     /// <summary>A token limit needs a token field in the template, or the engine could not apply it.</summary>
@@ -72,17 +49,6 @@ public class CompositionRootTests
         Assert.Contains("max_tokens", failure.Message, StringComparison.Ordinal);
     }
 
-    /// <summary>A budget and its period are settings of each cloud provider.</summary>
-    [Fact]
-    public void AddInfrastructure_Budget_ReachesProvider()
-    {
-        using var services = Build(Provider("OpenAiCompatible", ("ApiKey", "secret"), ("TokenBudget", "5000"), ("BudgetPeriodHours", "12")));
-
-        var budget = services.GetServices<IChatProvider>().Single(provider => provider.Name == "test").Budget;
-
-        Assert.Equal(new TokenBudget(5000, TimeSpan.FromHours(12)), budget);
-    }
-
     /// <summary>A missing Type, a number, or an unknown name stops the engine at startup. The provider does not become an OpenAI provider.</summary>
     /// <param name="type">The configured Type, or <see langword="null"/> for no Type.</param>
     [Theory]
@@ -91,6 +57,7 @@ public class CompositionRootTests
     [InlineData("0")]
     [InlineData("1")]
     [InlineData("5")]
+    [InlineData("Anthropic")]
     [InlineData("Antropic")]
     public void AddInfrastructure_InvalidType_Throws(string? type)
     {
@@ -126,6 +93,8 @@ public class CompositionRootTests
     /// <param name="key">The unknown setting.</param>
     [Theory]
     [InlineData("MaxRetries")]
+    [InlineData("TokenBudget")]
+    [InlineData("BudgetPeriodHours")]
     [InlineData("ApiKy")]
     public void AddInfrastructure_UnknownProviderSetting_Throws(string key)
     {

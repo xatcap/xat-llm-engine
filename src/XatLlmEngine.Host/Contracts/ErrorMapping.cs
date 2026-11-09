@@ -26,7 +26,6 @@ internal static class ErrorMapping
         ErrorKind.Unavailable => StatusCodes.Status503ServiceUnavailable,
         ErrorKind.Upstream => StatusCodes.Status502BadGateway,
         ErrorKind.Overloaded => StatusCodes.Status503ServiceUnavailable,
-        ErrorKind.BudgetExceeded => StatusCodes.Status429TooManyRequests,
     };
 
     /// <summary>Builds the response body for an error.</summary>
@@ -40,7 +39,6 @@ internal static class ErrorMapping
         ErrorKind.Unavailable => "service_unavailable_error",
         ErrorKind.Upstream => "upstream_error",
         ErrorKind.Overloaded => "overloaded_error",
-        ErrorKind.BudgetExceeded => "budget_exceeded_error",
     }));
 
     /// <summary>Builds the complete HTTP result for an error, and asks callers to wait before retrying when the failure is temporary. The wait is the provider's own, when the provider sent one. The wait is always at least 1 second, so that callers do not retry immediately.</summary>
@@ -49,7 +47,7 @@ internal static class ErrorMapping
     /// <returns>The result to return from the endpoint.</returns>
     public static IResult ToResult(HttpContext context, EngineError error)
     {
-        if (error.Kind is ErrorKind.Unavailable or ErrorKind.RateLimited or ErrorKind.Overloaded or ErrorKind.BudgetExceeded)
+        if (error.Kind is ErrorKind.Unavailable or ErrorKind.RateLimited or ErrorKind.Overloaded)
         {
             context.Response.Headers.RetryAfter = error.RetryAfter is { } delay
                 ? Math.Max(1, (long)Math.Ceiling(delay.TotalSeconds)).ToString(CultureInfo.InvariantCulture)

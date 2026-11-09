@@ -29,9 +29,6 @@ public enum ProviderState
 
     /// <summary>The provider is configured, but turned off, for example because it has no API key.</summary>
     Disabled,
-
-    /// <summary>The provider has used its token budget. The engine refuses its requests until the use drops below the budget.</summary>
-    BudgetExhausted,
 }
 
 /// <summary>The load on a provider that queues requests in the engine.</summary>

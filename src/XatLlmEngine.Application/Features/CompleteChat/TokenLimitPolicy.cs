@@ -14,10 +14,9 @@ internal static class TokenLimitPolicy
 
     /// <summary>Refuses a request that asks for more tokens than the limit, and adds the limit to a request that has none.</summary>
     /// <param name="provider">The selected provider.</param>
-    /// <param name="body">The request's own copy of the body, after the renames of portable fields. This method can change it.</param>
-    /// <param name="sentName">Gives the name that the caller sent for a native field, so that an error names the caller's own field.</param>
+    /// <param name="body">The request's own copy of the body. This method can change it.</param>
     /// <returns>The problem, or <see langword="null"/> when the request can go ahead.</returns>
-    public static EngineError? Apply(IChatProvider provider, JsonObject body, Func<string, string> sentName)
+    public static EngineError? Apply(IChatProvider provider, JsonObject body)
     {
         var limit = provider.MaxTokensLimit;
         var fields = LimitFields.Where(field => provider.RequestFields.Contains(field, StringComparer.Ordinal)).ToList();
@@ -35,18 +34,18 @@ internal static class TokenLimitPolicy
             if (body[field] is not JsonValue value || value.GetValueKind() != JsonValueKind.Number
                 || !decimal.TryParse(value.ToJsonString(), NumberStyles.Float, CultureInfo.InvariantCulture, out var asked))
             {
-                return new EngineError(ErrorKind.InvalidRequest, $"The field '{sentName(field)}' must be a number.");
+                return new EngineError(ErrorKind.InvalidRequest, $"The field '{field}' must be a number.");
             }
 
             // A value below 1 can mean "no limit" to a server, for example -1 to llama-server.
             if (asked < 1 || asked != decimal.Truncate(asked))
             {
-                return new EngineError(ErrorKind.InvalidRequest, $"The field '{sentName(field)}' must be a whole number of at least 1.");
+                return new EngineError(ErrorKind.InvalidRequest, $"The field '{field}' must be a whole number of at least 1.");
             }
 
             if (asked > limit)
             {
-                return new EngineError(ErrorKind.InvalidRequest, $"The provider '{provider.Name}' allows at most {limit} tokens in '{sentName(field)}'.");
+                return new EngineError(ErrorKind.InvalidRequest, $"The provider '{provider.Name}' allows at most {limit} tokens in '{field}'.");
             }
         }
 

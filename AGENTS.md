@@ -15,33 +15,17 @@ This file is an index to the documentation in this repository.
 | Page | What it covers |
 |------|----------------|
 | [README.md](README.md) | The goal of the engine, who it is for, what it is not, a quick start, and links to the other pages. |
-| [docs/embedding.md](docs/embedding.md) | How a desktop app starts, finds, stops and ships the engine: port 0, the ready file, the input close, the data folder and signing. |
+| [docs/quickstart.md](docs/quickstart.md) | Download a release, prepare its folder, and start the API. |
 | [docs/api.md](docs/api.md) | Routes, request templates, content rules, streams, errors, health and supported models. |
-| [docs/configuration.md](docs/configuration.md) | Each setting, how to add a provider, startup checks and how to change the local model. |
-| [docs/operations.md](docs/operations.md) | Install by hand, logs, metrics, traces, the data folder, privacy, local failure handling and troubleshooting. |
-| [docs/development.md](docs/development.md) | Build, test, project layout, Swagger, local packages, releases and third-party notices. |
+| [docs/architecture.md](docs/architecture.md) | Architecture diagram, architectural layers, interactions between layers and components, and flow of data. |
 | [docs/portable/writing-style/writing-style.md](docs/portable/writing-style/writing-style.md) | The ASD-STE100 writing rules. All documentation, code comments, API descriptions, error messages and log messages follow them. |
 
-Build and test commands are in the [Build and test](docs/development.md#build-and-test) section of the development guide.
+## Build and test
 
-## Architecture decisions
-
-The ADRs record the significant decisions and their reasons. Read them before you change a related part of the system.
-
-| ADR | Status |
-|-----|--------|
-| [0001. Run llama.cpp as a child process](docs/adr/0001-run-llama-cpp-as-child-process.md) | Accepted |
-| [0002. Expose an OpenAI-compatible API, with plain HTTP adapters](docs/adr/0002-openai-compatible-api-and-http-adapters.md) | Partly replaced by 0004, see 0012 |
-| [0003. Attach the model as a separate release file](docs/adr/0003-release-packaging.md) | Accepted |
-| [0004. Give each provider its own request template](docs/adr/0004-one-request-template-per-provider.md) | Accepted, amended |
-| [0005. Use Semantic Versioning, a changelog and locked packages](docs/adr/0005-versioning-policy.md) | Accepted |
-| [0006. Never retry a request, and limit the time of each part of a request](docs/adr/0006-no-retries-and-time-limits.md) | Accepted |
-| [0007. Map each kind of failure to one status code and one error type](docs/adr/0007-error-model-and-status-codes.md) | Accepted |
-| [0008. Read the first piece before the success status](docs/adr/0008-streaming-contract.md) | Accepted |
-| [0009. Queue local requests in the engine, and stop a busy server only when it sends nothing](docs/adr/0009-local-load-and-hang-policy.md) | Accepted |
-| [0010. Report the health of each provider, with stable values](docs/adr/0010-health-contract.md) | Accepted |
-| [0011. Limit the cost of cloud providers with a token limit and a token budget](docs/adr/0011-cost-control.md) | Accepted, amended |
-| [0012. Accept portable field names for providers that use the OpenAI format](docs/adr/0012-portable-fields.md) | Accepted |
+```bash
+dotnet build XatLlmEngine.slnx
+dotnet test --solution XatLlmEngine.slnx
+```
 
 ## Engineering guidelines
 

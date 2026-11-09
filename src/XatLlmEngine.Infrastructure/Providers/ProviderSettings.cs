@@ -60,11 +60,6 @@ internal static class ProviderSettings
             problems.Add("The BaseUrl must use https, or http on this machine only.");
         }
 
-        if (options.Type == ProviderType.Anthropic && options.MaxTokensLimit < 1)
-        {
-            problems.Add("An Anthropic provider must set MaxTokensLimit, because the Anthropic API requires a token limit on every request.");
-        }
-
         if (options.MaxTokensLimit > 0 && !TokenLimitFields.Any(field => options.RequestFields.Contains(field, StringComparer.Ordinal)))
         {
             problems.Add($"MaxTokensLimit needs one of these fields in RequestFields: {string.Join(", ", TokenLimitFields)}.");

@@ -19,7 +19,7 @@ public sealed record ModelReference
     public string Model { get; }
 
     /// <summary>Parses a model reference. Only the first slash separates the two parts, because model names can contain slashes.</summary>
-    /// <param name="value">The text sent by the caller, for example <c>anthropic/claude-sonnet-5-5</c>.</param>
+    /// <param name="value">The text sent by the caller, for example <c>local/ministral-3-3b</c>.</param>
     /// <returns>The parsed reference, or an invalid-request failure when either part is missing.</returns>
     public static Result<ModelReference> Parse(string? value)
     {

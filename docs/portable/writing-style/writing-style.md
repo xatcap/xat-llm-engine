@@ -30,7 +30,7 @@ If a rule makes a sentence harder to read, make the sentence easy to read. For e
 
 | Use | Meaning | Do not use |
 |---|---|---|
-| provider | A configured source of models, such as `anthropic` or `local`. | backend |
+| provider | A configured source of models, such as `openai` or `local`. | backend |
 | vendor | The company that operates a cloud service. | provider, for the company |
 | start | Make a program or a task begin. | launch, spin up, boot |
 | stop | Make a program or a task end. | shut down, terminate. Use "kill" only for the operating system action. |

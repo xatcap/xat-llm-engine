@@ -1,14 +1,12 @@
 using System.Text.Json.Nodes;
-using Microsoft.Extensions.Time.Testing;
 using XatLlmEngine.Application.Abstractions;
 using XatLlmEngine.Application.Features.CompleteChat;
-using XatLlmEngine.Application.Features.Health;
 using XatLlmEngine.Application.Features.Providers;
 using XatLlmEngine.Domain;
 
 namespace XatLlmEngine.Application.Tests;
 
-/// <summary>Tests the token limit, the token budget and the estimate of tokens.</summary>
+/// <summary>Tests the output token limit and stream usage forwarding.</summary>
 public class CostControlTests
 {
     /// <summary>A request that asks for more tokens than the limit gets 400, and the provider is not called.</summary>
@@ -84,116 +82,7 @@ public class CostControlTests
         Assert.False(provider.LastRequest!.Body.ContainsKey("max_tokens"));
     }
 
-    /// <summary>A provider that has used its budget gets 429, with the wait until enough tokens leave the period. The provider is not called.</summary>
-    /// <returns>A task for the test.</returns>
-    [Fact]
-    public async Task Budget_UsedUp_FailsWithWait()
-    {
-        var time = new FakeTimeProvider(DateTimeOffset.Parse("2026-11-06T10:30:00Z", System.Globalization.CultureInfo.InvariantCulture));
-        var ledger = new MemoryLedger();
-        ledger.Record("cloud", 1000, time.GetUtcNow());
-        var provider = new FakeChatProvider("cloud") { Budget = new TokenBudget(1000, TimeSpan.FromHours(24)) };
-
-        var result = await new CompleteChatHandler(new ProviderRegistry([provider]), ledger: ledger, timeProvider: time).HandleAsync(Command(), TestContext.Current.CancellationToken);
-
-        Assert.Equal(ErrorKind.BudgetExceeded, result.Error?.Kind);
-        Assert.Equal(TimeSpan.FromHours(24), result.Error?.RetryAfter);
-        Assert.Null(provider.LastRequest);
-    }
-
-    /// <summary>Each answer counts against the budget. The engine estimates the tokens when the provider does not report them.</summary>
-    /// <returns>A task for the test.</returns>
-    [Fact]
-    public async Task Budget_AnswerWithoutUsage_RecordsEstimate()
-    {
-        var ledger = new MemoryLedger();
-        var provider = new FakeChatProvider("cloud") { Budget = new TokenBudget(1_000_000, TimeSpan.FromHours(1)) };
-
-        await new CompleteChatHandler(new ProviderRegistry([provider]), ledger: ledger).HandleAsync(Command(), TestContext.Current.CancellationToken);
-
-        // The answer "answer" is 6 bytes, so 2 tokens. The messages are a small JSON array.
-        Assert.True(ledger.Total("cloud") > 2);
-    }
-
-    /// <summary>A stream that the caller stops counts the tokens that arrived.</summary>
-    /// <returns>A task for the test.</returns>
-    [Fact]
-    public async Task Budget_StreamCanceled_RecordsTokens()
-    {
-        var ledger = new MemoryLedger();
-        var provider = new FakeChatProvider("cloud")
-        {
-            Budget = new TokenBudget(1_000_000, TimeSpan.FromHours(1)),
-            Chunks = [new ChatChunk("Hi", null, new TokenUsage(10, 1)), new ChatChunk(" there", FinishReason.Stop, null)],
-        };
-        var result = await new StreamChatHandler(new ProviderRegistry([provider]), ledger: ledger).HandleAsync(Command(), TestContext.Current.CancellationToken);
-
-        await using (var answer = result.Value!)
-        {
-            await foreach (var _ in answer.ReadAsync())
-            {
-                break;
-            }
-        }
-
-        Assert.Equal(11, ledger.Total("cloud"));
-    }
-
-    /// <summary>The health of a provider that has used its budget says so, and the provider cannot take requests.</summary>
-    [Fact]
-    public void Budget_UsedUp_HealthReportsIt()
-    {
-        var ledger = new MemoryLedger();
-        ledger.Record("cloud", 5, DateTimeOffset.UtcNow);
-        var provider = new FakeChatProvider("cloud") { Budget = new TokenBudget(5, TimeSpan.FromHours(1)) };
-
-        var health = new GetHealthHandler(new ProviderRegistry([provider]), new NoDisabled(), ledger).Handle(stopping: false);
-
-        Assert.Equal(ProviderState.BudgetExhausted, health.Providers.Single().Status.State);
-        Assert.Equal(OverallHealth.Unhealthy, health.Overall);
-    }
-
-    /// <summary>The health of a provider under its budget gives the use, and no time, because requests can go ahead.</summary>
-    [Fact]
-    public void Budget_UnderLimit_HealthGivesUse()
-    {
-        var ledger = new MemoryLedger();
-        ledger.Record("cloud", 3, DateTimeOffset.UtcNow);
-        var provider = new FakeChatProvider("cloud") { Budget = new TokenBudget(5, TimeSpan.FromHours(2)) };
-
-        var health = new GetHealthHandler(new ProviderRegistry([provider]), new NoDisabled(), ledger).Handle(stopping: false).Providers.Single();
-
-        Assert.Equal(ProviderState.Ready, health.Status.State);
-        Assert.Equal(new BudgetUse(3, 5, TimeSpan.FromHours(2), AvailableAt: null), health.Budget);
-    }
-
-    /// <summary>The health of a provider that has used its budget gives the time when requests can continue.</summary>
-    [Fact]
-    public void Budget_UsedUp_HealthGivesAvailableTime()
-    {
-        var time = new FakeTimeProvider(DateTimeOffset.Parse("2026-11-06T10:00:00Z", System.Globalization.CultureInfo.InvariantCulture));
-        var ledger = new MemoryLedger();
-        ledger.Record("cloud", 5, time.GetUtcNow());
-        var provider = new FakeChatProvider("cloud") { Budget = new TokenBudget(5, TimeSpan.FromHours(1)) };
-
-        var health = new GetHealthHandler(new ProviderRegistry([provider]), new NoDisabled(), ledger, time).Handle(stopping: false).Providers.Single();
-
-        Assert.True(health.Budget!.IsExhausted);
-        Assert.Equal(time.GetUtcNow().AddHours(1), health.Budget.AvailableAt);
-    }
-
-    /// <summary>A provider with no budget has no budget data in its health.</summary>
-    [Fact]
-    public void Budget_None_HealthHasNoUse()
-    {
-        var provider = new FakeChatProvider("cloud");
-
-        var health = new GetHealthHandler(new ProviderRegistry([provider]), new NoDisabled(), new MemoryLedger()).Handle(stopping: false).Providers.Single();
-
-        Assert.Null(health.Budget);
-    }
-
-    /// <summary>The caller gets the token counts of an OpenAI-style stream only when it asked for them. Other protocols always send them.</summary>
+    /// <summary>The caller gets the token counts of an OpenAI-style stream only when it asked for them. Templates without stream_options always forward counts when present.</summary>
     /// <param name="fields">The template, separated by ','.</param>
     /// <param name="askUsage">Whether the caller sets stream_options.include_usage.</param>
     /// <param name="expected">Whether the caller must get the counts.</param>
@@ -201,7 +90,7 @@ public class CostControlTests
     [Theory]
     [InlineData("messages,stream_options", false, false)]
     [InlineData("messages,stream_options", true, true)]
-    [InlineData("messages,system", false, true)]
+    [InlineData("messages", false, true)]
     public async Task Stream_ForwardUsage_FollowsCaller(string fields, bool askUsage, bool expected)
     {
         var provider = new FakeChatProvider("cloud") { RequestFields = fields.Split(','), Chunks = [new ChatChunk("Hi", FinishReason.Stop, new TokenUsage(1, 1))] };
@@ -215,40 +104,5 @@ public class CostControlTests
         await using var answer = result.Value!;
 
         Assert.Equal(expected, answer.ForwardUsage);
-    }
-
-    /// <summary>Builds a command.</summary>
-    /// <returns>The command.</returns>
-    private static CompleteChatCommand Command() =>
-        new("cloud/m", new JsonObject { ["messages"] = JsonNode.Parse("""[{"role":"user","content":"Hello there"}]""") });
-
-    /// <summary>A ledger in memory, with one bucket for each record.</summary>
-    private sealed class MemoryLedger : IUsageLedger
-    {
-        /// <summary>The records.</summary>
-        private readonly List<(string Provider, long Tokens, DateTimeOffset Time)> records = [];
-
-        /// <summary>Gives all tokens of a provider.</summary>
-        /// <param name="provider">The provider.</param>
-        /// <returns>The tokens.</returns>
-        public long Total(string provider) => records.Where(record => record.Provider == provider).Sum(record => record.Tokens);
-
-        /// <inheritdoc/>
-        public long Used(string provider, TimeSpan period, DateTimeOffset now) =>
-            records.Where(record => record.Provider == provider && record.Time > now - period).Sum(record => record.Tokens);
-
-        /// <inheritdoc/>
-        public DateTimeOffset AvailableAt(string provider, TokenBudget budget, DateTimeOffset now) =>
-            records.Where(record => record.Provider == provider).Min(record => record.Time) + budget.Period;
-
-        /// <inheritdoc/>
-        public void Record(string provider, long tokens, DateTimeOffset now) => records.Add((provider, tokens, now));
-    }
-
-    /// <summary>No disabled providers.</summary>
-    private sealed class NoDisabled : IDisabledProviders
-    {
-        /// <inheritdoc/>
-        public IReadOnlyList<string> Names => [];
     }
 }
