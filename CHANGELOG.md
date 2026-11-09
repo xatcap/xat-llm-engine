@@ -6,20 +6,23 @@ The release workflow uses the section of each version as its release notes. Writ
 
 ## [Unreleased]
 
+## [1.0.3] - 2026-11-10
+
 ### Changed
 
-- **Breaking:** The engine no longer inspects `messages` for tool roles, `tool_calls` or tool content blocks. It checks only the top-level request fields against the provider's `RequestFields` template and forwards `messages` unchanged.
+- **Breaking:** The engine no longer checks `messages` for tool content. It checks only the top-level fields against the provider's `RequestFields` template and forwards `messages` unchanged.
 
 ### Removed
 
-- **Breaking:** The built-in `Anthropic` provider type and the default `anthropic` provider in `appsettings.json`. Only the `local` provider and `OpenAiCompatible` cloud providers remain.
-- **Breaking:** Portable field renaming across providers and the `xat_engine.renamed_fields` trace tag. Each provider accepts only `model`, `stream` and the fields in its `RequestFields` template.
-- **Breaking:** Rolling token budgets and the `usage.json` ledger:
+- **Breaking:** The `Anthropic` provider type and the default `anthropic` provider in `appsettings.json`. Only the `local` provider and `OpenAiCompatible` cloud providers remain.
+- **Breaking:** Portable fields and the `xat_engine.renamed_fields` trace tag. Each provider accepts only the fields in its `RequestFields` template, plus `model` and `stream`.
+- **Breaking:** Token budgets and the `usage.json` file:
   - `Providers:<name>:TokenBudget` and `BudgetPeriodHours`,
   - the `budget_exceeded_error` error type,
-  - the `budget_exhausted` provider state and the `budget` object in `/health`, and
-  - the `source` tag on the `xat_engine.tokens` metric.
-  Per-request `MaxTokensLimit` remains.
+  - the `budget_exhausted` provider state and the `budget` object in `/health`,
+  - the `source` tag on the `xat_engine.tokens` metric, and
+  - the startup warning when `Engine:DataFolder` is empty.
+  `MaxTokensLimit` still limits each request.
 
 ## [1.0.2] - 2026-11-06
 
