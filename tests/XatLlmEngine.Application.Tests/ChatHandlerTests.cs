@@ -34,9 +34,9 @@ public class ChatHandlerTests
     [Fact]
     public async Task Complete_ProviderNameInOtherCase_StillRoutes()
     {
-        var handler = new CompleteChatHandler(new ProviderRegistry([new FakeChatProvider("OpenAI")]));
+        var handler = new CompleteChatHandler(new ProviderRegistry([new FakeChatProvider("Local")]));
 
-        var result = await handler.HandleAsync(new CompleteChatCommand("openai/model", Hello()), TestContext.Current.CancellationToken);
+        var result = await handler.HandleAsync(new CompleteChatCommand("local/model", Hello()), TestContext.Current.CancellationToken);
 
         Assert.True(result.IsSuccess);
     }
@@ -58,10 +58,10 @@ public class ChatHandlerTests
     [Fact]
     public async Task Stream_ProviderFails_ReturnsThatFailure()
     {
-        var failure = new EngineError(ErrorKind.RateLimited, "Slow down.");
-        var handler = new StreamChatHandler(new ProviderRegistry([new FakeChatProvider("cloud") { Failure = failure }]));
+        var failure = new EngineError(ErrorKind.Overloaded, "Slow down.");
+        var handler = new StreamChatHandler(new ProviderRegistry([new FakeChatProvider("local") { Failure = failure }]));
 
-        var result = await handler.HandleAsync(new CompleteChatCommand("cloud/model", Hello()), TestContext.Current.CancellationToken);
+        var result = await handler.HandleAsync(new CompleteChatCommand("local/model", Hello()), TestContext.Current.CancellationToken);
 
         Assert.Equal(failure, result.Error);
     }
@@ -71,12 +71,12 @@ public class ChatHandlerTests
     [Fact]
     public async Task Complete_FieldNotInTemplate_FailsAndNamesIt()
     {
-        var provider = new FakeChatProvider("cloud");
+        var provider = new FakeChatProvider("local");
         var handler = new CompleteChatHandler(new ProviderRegistry([provider]));
         var body = Hello();
         body["seed"] = 7;
 
-        var result = await handler.HandleAsync(new CompleteChatCommand("cloud/model", body), TestContext.Current.CancellationToken);
+        var result = await handler.HandleAsync(new CompleteChatCommand("local/model", body), TestContext.Current.CancellationToken);
 
         Assert.Equal(ErrorKind.InvalidRequest, result.Error!.Kind);
         Assert.Contains("'seed'", result.Error.Message, StringComparison.Ordinal);
@@ -109,12 +109,12 @@ public class ChatHandlerTests
     [Fact]
     public async Task Complete_ModelAndStream_AreAlwaysAccepted()
     {
-        var handler = new CompleteChatHandler(new ProviderRegistry([new FakeChatProvider("cloud")]));
+        var handler = new CompleteChatHandler(new ProviderRegistry([new FakeChatProvider("local")]));
         var body = Hello();
-        body["model"] = "cloud/model";
+        body["model"] = "local/model";
         body["stream"] = false;
 
-        var result = await handler.HandleAsync(new CompleteChatCommand("cloud/model", body), TestContext.Current.CancellationToken);
+        var result = await handler.HandleAsync(new CompleteChatCommand("local/model", body), TestContext.Current.CancellationToken);
 
         Assert.True(result.IsSuccess);
     }
@@ -126,11 +126,11 @@ public class ChatHandlerTests
         var handler = new ListModelsHandler(new ProviderRegistry(
         [
             new FakeChatProvider("local") { Models = ["small"] },
-            new FakeChatProvider("cloud") { Models = ["a", "b"] },
+            new FakeChatProvider("query-expansion") { Models = ["a", "b"] },
         ]));
 
-        Assert.Equal(["local/small", "cloud/a", "cloud/b"], handler.Handle().Select(entry => entry.Id));
-        Assert.Equal(["local", "cloud", "cloud"], handler.Handle().Select(entry => entry.Provider));
+        Assert.Equal(["local/small", "query-expansion/a", "query-expansion/b"], handler.Handle().Select(entry => entry.Id));
+        Assert.Equal(["local", "query-expansion", "query-expansion"], handler.Handle().Select(entry => entry.Provider));
     }
 
     /// <summary>The provider gets its own copy of the body, so a change by the provider never reaches the caller's body.</summary>
@@ -138,11 +138,11 @@ public class ChatHandlerTests
     [Fact]
     public async Task Complete_ProviderChangesBody_CallerBodyStays()
     {
-        var provider = new FakeChatProvider("cloud") { ChangeBody = true };
+        var provider = new FakeChatProvider("local") { ChangeBody = true };
         var handler = new CompleteChatHandler(new ProviderRegistry([provider]));
         var body = Hello();
 
-        await handler.HandleAsync(new CompleteChatCommand("cloud/model", body), TestContext.Current.CancellationToken);
+        await handler.HandleAsync(new CompleteChatCommand("local/model", body), TestContext.Current.CancellationToken);
 
         Assert.False(body.ContainsKey("added"));
         Assert.True(provider.LastRequest!.Body.ContainsKey("added"));
@@ -153,13 +153,13 @@ public class ChatHandlerTests
     [Fact]
     public async Task Complete_ImageContent_Passes()
     {
-        var handler = new CompleteChatHandler(new ProviderRegistry([new FakeChatProvider("cloud")]));
+        var handler = new CompleteChatHandler(new ProviderRegistry([new FakeChatProvider("local")]));
         var body = new JsonObject
         {
             ["messages"] = JsonNode.Parse("""[{"role":"user","content":[{"type":"text","text":"What is this?"},{"type":"image_url","image_url":{"url":"data:image/png;base64,AA=="}}]},{"role":"assistant","content":"A cat."}]"""),
         };
 
-        var result = await handler.HandleAsync(new CompleteChatCommand("cloud/model", body), TestContext.Current.CancellationToken);
+        var result = await handler.HandleAsync(new CompleteChatCommand("local/model", body), TestContext.Current.CancellationToken);
 
         Assert.True(result.IsSuccess);
     }
@@ -169,14 +169,14 @@ public class ChatHandlerTests
     [Fact]
     public async Task Complete_ToolMessageContent_Passes()
     {
-        var provider = new FakeChatProvider("cloud");
+        var provider = new FakeChatProvider("local");
         var handler = new CompleteChatHandler(new ProviderRegistry([provider]));
         var body = new JsonObject
         {
             ["messages"] = JsonNode.Parse("""[{"role":"assistant","tool_calls":[{"id":"call_1","type":"function"}]},{"role":"tool","tool_call_id":"call_1","content":[{"type":"tool_result","content":"ok"}]}]"""),
         };
 
-        var result = await handler.HandleAsync(new CompleteChatCommand("cloud/model", body), TestContext.Current.CancellationToken);
+        var result = await handler.HandleAsync(new CompleteChatCommand("local/model", body), TestContext.Current.CancellationToken);
 
         Assert.True(result.IsSuccess);
         Assert.Equal(2, provider.LastRequest!.Body["messages"]!.AsArray().Count);
@@ -186,9 +186,9 @@ public class ChatHandlerTests
     [Fact]
     public void Registry_DuplicateNames_Throws()
     {
-        var failure = Assert.Throws<InvalidOperationException>(() => new ProviderRegistry([new FakeChatProvider("cloud"), new FakeChatProvider("CLOUD")]));
+        var failure = Assert.Throws<InvalidOperationException>(() => new ProviderRegistry([new FakeChatProvider("local"), new FakeChatProvider("LOCAL")]));
 
-        Assert.Contains("cloud", failure.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("local", failure.Message, StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>A stream with no piece fails before the success status.</summary>
@@ -196,9 +196,9 @@ public class ChatHandlerTests
     [Fact]
     public async Task Stream_NoPiece_FailsAsUpstream()
     {
-        var handler = new StreamChatHandler(new ProviderRegistry([new FakeChatProvider("cloud") { Chunks = [] }]));
+        var handler = new StreamChatHandler(new ProviderRegistry([new FakeChatProvider("local") { Chunks = [] }]));
 
-        var result = await handler.HandleAsync(new CompleteChatCommand("cloud/model", Hello()), TestContext.Current.CancellationToken);
+        var result = await handler.HandleAsync(new CompleteChatCommand("local/model", Hello()), TestContext.Current.CancellationToken);
 
         Assert.Equal(ErrorKind.Upstream, result.Error!.Kind);
     }
@@ -209,9 +209,9 @@ public class ChatHandlerTests
     public async Task Stream_FailsAtFirstPiece_ReturnsFailure()
     {
         var failure = new EngineError(ErrorKind.Unavailable, "Gone.");
-        var handler = new StreamChatHandler(new ProviderRegistry([new FakeChatProvider("cloud") { Chunks = [], StreamFailure = failure }]));
+        var handler = new StreamChatHandler(new ProviderRegistry([new FakeChatProvider("local") { Chunks = [], StreamFailure = failure }]));
 
-        var result = await handler.HandleAsync(new CompleteChatCommand("cloud/model", Hello()), TestContext.Current.CancellationToken);
+        var result = await handler.HandleAsync(new CompleteChatCommand("local/model", Hello()), TestContext.Current.CancellationToken);
 
         Assert.Equal(failure, result.Error);
     }
@@ -221,8 +221,8 @@ public class ChatHandlerTests
     [Fact]
     public async Task Stream_NoFinishReason_Throws()
     {
-        var handler = new StreamChatHandler(new ProviderRegistry([new FakeChatProvider("cloud") { Chunks = [new ChatChunk("Hi", null, null)] }]));
-        var result = await handler.HandleAsync(new CompleteChatCommand("cloud/model", Hello()), TestContext.Current.CancellationToken);
+        var handler = new StreamChatHandler(new ProviderRegistry([new FakeChatProvider("local") { Chunks = [new ChatChunk("Hi", null, null)] }]));
+        var result = await handler.HandleAsync(new CompleteChatCommand("local/model", Hello()), TestContext.Current.CancellationToken);
         await using var answer = result.Value!;
 
         var failure = await Assert.ThrowsAsync<ChatStreamException>(async () =>
@@ -246,8 +246,8 @@ public class ChatHandlerTests
             new ChatChunk(null, null, new TokenUsage(3, 1)),
             new ChatChunk(" there", FinishReason.Stop, new TokenUsage(3, 2)),
         };
-        var handler = new StreamChatHandler(new ProviderRegistry([new FakeChatProvider("cloud") { Chunks = chunks }]));
-        var result = await handler.HandleAsync(new CompleteChatCommand("cloud/model", Hello()), TestContext.Current.CancellationToken);
+        var handler = new StreamChatHandler(new ProviderRegistry([new FakeChatProvider("local") { Chunks = chunks }]));
+        var result = await handler.HandleAsync(new CompleteChatCommand("local/model", Hello()), TestContext.Current.CancellationToken);
         await using var answer = result.Value!;
 
         var pieces = new List<ChatChunk>();
@@ -258,6 +258,6 @@ public class ChatHandlerTests
 
         Assert.Equal([new ChatChunk("Hi", null, null), new ChatChunk(" there", FinishReason.Stop, null)], pieces);
         Assert.Equal(new TokenUsage(3, 2), answer.Usage);
-        Assert.Equal("cloud/model", answer.Model);
+        Assert.Equal("local/model", answer.Model);
     }
 }

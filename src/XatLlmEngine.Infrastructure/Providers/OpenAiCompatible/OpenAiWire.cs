@@ -1,4 +1,14 @@
+using System.Text.Json.Serialization;
+
 namespace XatLlmEngine.Infrastructure.Providers.OpenAiCompatible;
+
+/// <summary>Source-generated JSON handling for the OpenAI chat completions protocol. The protocol uses snake_case.</summary>
+[JsonSourceGenerationOptions(
+    PropertyNamingPolicy = JsonKnownNamingPolicy.SnakeCaseLower,
+    DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+    PropertyNameCaseInsensitive = true)]
+[JsonSerializable(typeof(OpenAiChatResponse))]
+internal sealed partial class OpenAiJson : JsonSerializerContext;
 
 /// <summary>A chat message, also used for the delta inside a stream chunk.</summary>
 /// <param name="Role">The author's role.</param>

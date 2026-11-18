@@ -8,10 +8,10 @@ using XatLlmEngine.Infrastructure.Providers.OpenAiCompatible;
 
 namespace XatLlmEngine.Infrastructure.Tests;
 
-/// <summary>Tests how the shared transport handles broken connections, time limits and size limits.</summary>
+/// <summary>Tests how the transport handles broken connections and size limits.</summary>
 public class ProviderTransportTests
 {
-    /// <summary>A short limit, so that the tests run fast.</summary>
+    /// <summary>A short wait, so that the tests run fast.</summary>
     private static readonly TimeSpan ShortLimit = TimeSpan.FromMilliseconds(200);
 
     /// <summary>A documented non-streaming response.</summary>
@@ -47,58 +47,41 @@ public class ProviderTransportTests
     [Fact]
     public async Task Stream_ConnectionResetInErrorBody_KeepsStatus()
     {
-        var http = new StubHttpHandler(HttpStatusCode.TooManyRequests, """{"error":""") { ThrowWhileReading = new IOException("reset") };
+        var http = new StubHttpHandler(HttpStatusCode.ServiceUnavailable, """{"error":""") { ThrowWhileReading = new IOException("reset") };
 
         var result = await Client(http).StreamAsync(Address, "key", TestRequests.Minimal, TestContext.Current.CancellationToken);
 
-        Assert.Equal(ErrorKind.RateLimited, result.Error?.Kind);
+        Assert.Equal(ErrorKind.Unavailable, result.Error?.Kind);
     }
 
-    /// <summary>A provider that never sends the headers fails when the time limit ends.</summary>
+    /// <summary>The engine sends a failed request once. It does not retry.</summary>
+    /// <param name="status">The server's answer.</param>
+    /// <returns>A task for the test.</returns>
+    [Theory]
+    [InlineData(HttpStatusCode.ServiceUnavailable)]
+    [InlineData(HttpStatusCode.InternalServerError)]
+    [InlineData(HttpStatusCode.TooManyRequests)]
+    public async Task Complete_FailedResponse_SendsOnce(HttpStatusCode status)
+    {
+        var http = new StubHttpHandler(status, """{"error":{"message":"busy"}}""");
+
+        var result = await Client(http).CompleteAsync(Address, "key", TestRequests.Minimal, TestContext.Current.CancellationToken);
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal(1, http.RequestCount);
+    }
+
+    /// <summary>A connection failure is also not retried.</summary>
     /// <returns>A task for the test.</returns>
     [Fact]
-    public async Task Complete_NoHeaders_FailsAfterRequestTimeout()
+    public async Task Complete_ConnectionFailure_SendsOnce()
     {
-        var http = new StubHttpHandler(HttpStatusCode.OK, CompletionBody) { HangBeforeHeaders = true };
+        var http = new StubHttpHandler(HttpStatusCode.OK, string.Empty) { Throw = new HttpRequestException("refused") };
 
-        var result = await Client(http, requestTimeout: ShortLimit).CompleteAsync(Address, "key", TestRequests.Minimal, TestContext.Current.CancellationToken);
+        var result = await Client(http).CompleteAsync(Address, "key", TestRequests.Minimal, TestContext.Current.CancellationToken);
 
         Assert.Equal(ErrorKind.Unavailable, result.Error?.Kind);
-        Assert.Contains("did not start its answer", result.Error?.Message, StringComparison.Ordinal);
-    }
-
-    /// <summary>A provider that sends the headers and then stops fails when the idle limit ends.</summary>
-    /// <returns>A task for the test.</returns>
-    [Fact]
-    public async Task Complete_StalledBody_FailsAfterIdleTimeout()
-    {
-        var http = new StubHttpHandler(HttpStatusCode.OK, """{"choices":[""") { StallAtEnd = true };
-
-        var result = await Client(http, readIdleTimeout: ShortLimit).CompleteAsync(Address, "key", TestRequests.Minimal, TestContext.Current.CancellationToken);
-
-        Assert.Equal(ErrorKind.Unavailable, result.Error?.Kind);
-        Assert.Contains("sent no data", result.Error?.Message, StringComparison.Ordinal);
-    }
-
-    /// <summary>A stream that stops without an end fails part-way, with a temporary failure.</summary>
-    /// <returns>A task for the test.</returns>
-    [Fact]
-    public async Task Stream_Stalls_FailsAfterIdleTimeout()
-    {
-        var http = new StubHttpHandler(HttpStatusCode.OK, "data: {\"choices\":[{\"delta\":{\"content\":\"Hi\"}}]}\n\n") { StallAtEnd = true };
-        var result = await Client(http, readIdleTimeout: ShortLimit).StreamAsync(Address, "key", TestRequests.Minimal, TestContext.Current.CancellationToken);
-        var chunks = new List<ChatChunk>();
-
-        var failure = await Assert.ThrowsAsync<ChatStreamException>(async () =>
-        {
-            await foreach (var chunk in result.Value!)
-            {
-                chunks.Add(chunk);
-            }
-        });
-
-        Assert.Equal("Hi", Assert.Single(chunks).Content);
-        Assert.Equal(ErrorKind.Unavailable, failure.Error.Kind);
+        Assert.Equal(1, http.RequestCount);
     }
 
     /// <summary>The caller's own cancellation stays a cancellation. It is not an error from the provider.</summary>
@@ -111,7 +94,7 @@ public class ProviderTransportTests
         cancel.CancelAfter(ShortLimit);
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
-            Client(http, requestTimeout: TimeSpan.FromMinutes(1)).CompleteAsync(Address, "key", TestRequests.Minimal, cancel.Token));
+            Client(http).CompleteAsync(Address, "key", TestRequests.Minimal, cancel.Token));
     }
 
     /// <summary>An error body larger than the limit gives the general message, so that a provider cannot fill the engine's memory.</summary>
@@ -140,21 +123,21 @@ public class ProviderTransportTests
         Assert.Equal(ErrorKind.Upstream, result.Error?.Kind);
     }
 
-    /// <summary>An authentication failure of the local server does not tell the user to correct a key, because the engine makes that key.</summary>
+    /// <summary>An authentication failure of llama-server does not tell the user to correct a key, because the engine makes that key.</summary>
     /// <returns>A task for the test.</returns>
     [Fact]
     public async Task Complete_LocalUnauthorized_GivesLocalAdvice()
     {
         var http = new StubHttpHandler(HttpStatusCode.Unauthorized, "{}");
 
-        var result = await Client(http, kind: ProviderKind.Local).CompleteAsync(Address, "key", TestRequests.Minimal, TestContext.Current.CancellationToken);
+        var result = await Client(http).CompleteAsync(Address, "key", TestRequests.Minimal, TestContext.Current.CancellationToken);
 
         Assert.Equal(ErrorKind.Upstream, result.Error?.Kind);
         Assert.DoesNotContain("API key", result.Error?.Message, StringComparison.Ordinal);
         Assert.Contains("Restart the engine", result.Error?.Message, StringComparison.Ordinal);
     }
 
-    /// <summary>A redirect is an error. The engine does not follow it, so an API key cannot go to another host.</summary>
+    /// <summary>A redirect is an error. The engine does not follow it, so the key of the engine cannot go to another host.</summary>
     /// <returns>A task for the test.</returns>
     [Fact]
     public async Task Complete_Redirect_FailsAsUpstream()
@@ -167,20 +150,16 @@ public class ProviderTransportTests
         Assert.Contains("302", result.Error?.Message, StringComparison.Ordinal);
     }
 
-    /// <summary>The real network handler of every provider client does not follow redirects.</summary>
-    /// <param name="client">The named client.</param>
-    [Theory]
-    [InlineData("provider-test")]
-    [InlineData(DependencyInjection.LocalHttpClientName)]
-    public void HttpClients_DoNotFollowRedirects(string client)
+    /// <summary>The real network handler of the llama-server client does not follow redirects.</summary>
+    [Fact]
+    public void HttpClient_DoesNotFollowRedirects()
     {
+        const string client = DependencyInjection.LocalHttpClientName;
         var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
         {
             ["LocalModel:RequestFields:0"] = "messages",
-            ["Providers:test:Type"] = "OpenAiCompatible",
-            ["Providers:test:BaseUrl"] = "https://api.example.com",
-            ["Providers:test:ApiKey"] = "secret",
-            ["Providers:test:RequestFields:0"] = "messages",
+            ["QueryExpansionModel:RequestFields:0"] = "messages",
+            ["QueryExpansionModel:RequestFields:1"] = "max_tokens",
         }).Build();
         using var services = new ServiceCollection().AddLogging().AddInfrastructure(configuration).BuildServiceProvider();
 
@@ -198,10 +177,6 @@ public class ProviderTransportTests
 
     /// <summary>Builds a client over the stubbed network.</summary>
     /// <param name="http">The stubbed network.</param>
-    /// <param name="kind">The kind of provider.</param>
-    /// <param name="requestTimeout">The limit for the headers.</param>
-    /// <param name="readIdleTimeout">The idle limit for the body.</param>
     /// <returns>The client.</returns>
-    private static OpenAiClient Client(StubHttpHandler http, ProviderKind kind = ProviderKind.Cloud, TimeSpan? requestTimeout = null, TimeSpan? readIdleTimeout = null) =>
-        new(TestTransports.Create(http, kind: kind, requestTimeout: requestTimeout, readIdleTimeout: readIdleTimeout));
+    private static OpenAiClient Client(StubHttpHandler http) => new(TestTransports.Create(http));
 }

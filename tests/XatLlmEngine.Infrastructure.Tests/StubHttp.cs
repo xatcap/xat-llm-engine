@@ -192,18 +192,12 @@ internal static class TestTransports
     /// <param name="http">The stubbed network.</param>
     /// <param name="logger">The log, or <see langword="null"/> for no log.</param>
     /// <param name="name">The provider's name.</param>
-    /// <param name="kind">The kind of provider.</param>
-    /// <param name="requestTimeout">The limit for the headers, or <see langword="null"/> for no limit.</param>
-    /// <param name="readIdleTimeout">The idle limit for the body, or <see langword="null"/> for no limit.</param>
     /// <returns>The transport.</returns>
     public static ProviderTransport Create(
         StubHttpHandler http,
         ILogger? logger = null,
-        string name = "test",
-        ProviderKind kind = ProviderKind.Cloud,
-        TimeSpan? requestTimeout = null,
-        TimeSpan? readIdleTimeout = null) =>
-        new(new TransportSettings(name, kind, "test", requestTimeout, readIdleTimeout), http, TimeProvider.System, logger ?? NullLogger.Instance);
+        string name = "test") =>
+        new(new TransportSettings(name, "test"), http, logger ?? NullLogger.Instance);
 }
 
 /// <summary>Shared request values. Each use gets a new body, because tests run in parallel.</summary>

@@ -2,9 +2,9 @@
 """Builds, tests and prepares release files. It uses only the standard library, so it runs the same way on every runner.
 
 Commands:
-  package     Builds the engine package for one platform, with the pinned llama.cpp build inside.
-  fetch-model Downloads the pinned model and checks its hash.
-  smoke-test  Runs a built package with the real model, and sends real chat requests.
+  package     Builds the engine package for one platform, with the pinned llama.cpp build and the query-expansion model inside.
+  fetch-model Downloads a pinned model and checks its hash. The main model is the default.
+  smoke-test  Runs a built package with the real models, and sends real chat and query-expansion requests.
   openapi     Writes the API document (docs/openapi.json) with the release version, for the release.
   finalize    Checks the size limit and writes SHA256SUMS for a folder of release files.
   check-changelog Checks that CHANGELOG.md has a section for a version, and can write that section as release notes.
@@ -32,6 +32,8 @@ BUILD = ROOT / "build"
 HOST_PROJECT = ROOT / "src" / "XatLlmEngine.Host" / "XatLlmEngine.Host.csproj"
 CHANGELOG = ROOT / "CHANGELOG.md"
 LICENSES = BUILD / "licenses"
+QUERY_EXPANSION_LOCK = "query-expansion-model.lock.json"
+QUERY_EXPANSION_LICENSE = "Qwen3-LICENSE.txt"
 HOST_LOCK = ROOT / "src" / "XatLlmEngine.Host" / "packages.lock.json"
 HOST_ASSETS = ROOT / "src" / "XatLlmEngine.Host" / "obj" / "project.assets.json"
 PROGRAM = "XatLlmEngine.Host"
@@ -185,6 +187,8 @@ def package(args):
     models = stage / "models"
     models.mkdir()
     shutil.copy(BUILD / "models-README.txt", models / "README.txt")
+    # The small model is part of the package. The main model is too large for it, so it is a separate release file.
+    shutil.copy(download_model(QUERY_EXPANSION_LOCK, Path(args.model_cache)), models / load_lock(QUERY_EXPANSION_LOCK)["file"])
     shutil.copy(ROOT / "LICENSE", stage / "LICENSE")
     shutil.copy(BUILD / "THIRD_PARTY_NOTICES.md", stage / "THIRD_PARTY_NOTICES.md")
     copy_licenses(stage, rid)
@@ -241,7 +245,10 @@ def notice_problems():
     for platform in llama["platformFiles"].values():
         files += [entry["file"] for entry in platform.values()]
         names += list(platform)
+    files.append(QUERY_EXPANSION_LICENSE)
     problems += [f"The license file build/licenses/{file} does not exist." for file in files if not (LICENSES / file).is_file()]
+    if "Qwen3" not in notices:
+        problems.append("THIRD_PARTY_NOTICES.md does not name the query-expansion model Qwen3.")
     problems += [f"THIRD_PARTY_NOTICES.md does not name {name}." for name in names if name not in notices]
     return problems
 
@@ -297,6 +304,7 @@ def copy_licenses(stage, rid):
         shutil.copy(LICENSES / file, target / file)
     for entry in llama["platformFiles"].get(rid, {}).values():
         shutil.copy(LICENSES / entry["file"], target / entry["file"])
+    shutil.copy(LICENSES / QUERY_EXPANSION_LICENSE, target / QUERY_EXPANSION_LICENSE)
 
     # The restore output names the exact packages of the build, and the folder that holds them.
     assets = json.loads(HOST_ASSETS.read_text(encoding="utf-8"))
@@ -331,7 +339,10 @@ def expected_license_files(rid):
     """Gives the license files that the package of a platform must contain, relative to its root folder."""
     manifest = load_manifest()
     llama = manifest["llamaCpp"]
-    files = ["LICENSE", "THIRD_PARTY_NOTICES.md", f"llama/{llama['archiveFile']}", "licenses/llama.cpp/LICENSE"]
+    files = [
+        "LICENSE", "THIRD_PARTY_NOTICES.md", f"llama/{llama['archiveFile']}", "licenses/llama.cpp/LICENSE",
+        f"licenses/{QUERY_EXPANSION_LICENSE}", f"models/{load_lock(QUERY_EXPANSION_LOCK)['file']}",
+    ]
     files += [f"licenses/{file}" for file in llama["bundled"].values()]
     for entry in llama["platformFiles"].get(rid, {}).values():
         files += [f"llama/{entry['archiveFile']}", f"licenses/{entry['file']}"]
@@ -342,11 +353,15 @@ def expected_license_files(rid):
     return files
 
 
-def fetch_model(args):
-    lock = load_lock("model.lock.json")
+def download_model(lock_name, folder):
+    """Downloads the model that a lock file pins, and checks its hash."""
+    lock = load_lock(lock_name)
     url = f"https://huggingface.co/{lock['repository']}/resolve/{lock['revision']}/{lock['file']}"
-    path = download_verified(url, Path(args.output) / lock["file"], lock["sha256"])
-    print(f"Model: {path}")
+    return download_verified(url, folder / lock["file"], lock["sha256"])
+
+
+def fetch_model(args):
+    print(f"Model: {download_model(args.lock, Path(args.output))}")
 
 
 def http_json(url, body=None, timeout=900):
@@ -378,6 +393,7 @@ def smoke_test(args):
         program = root / program_file_name(rid)
         if not (root / "llama" / server_file_name(rid)).exists():
             sys.exit("The package has no llama-server.")
+        # The query-expansion model is inside the package. The main model comes from the cache.
         missing = [file for file in expected_license_files(rid) if not (root / file).is_file()]
         if missing:
             sys.exit(f"The package has no license file {', '.join(missing)}.")
@@ -395,6 +411,7 @@ def smoke_test(args):
         )
         if args.gpu_layers:
             environment["LocalModel__GpuLayers"] = args.gpu_layers
+            environment["QueryExpansionModel__GpuLayers"] = args.gpu_layers
         # The working folder is deliberately different, to prove that the engine finds its files from its own location.
         engine = subprocess.Popen([str(program)], env=environment, cwd=tempfile.gettempdir(), stdin=subprocess.PIPE)
         try:
@@ -406,12 +423,14 @@ def smoke_test(args):
                 try:
                     health = http_json(f"{base}/health", timeout=5)
                     print(f"Health: {health}", flush=True)
-                    if health["local"] == "ready":
+                    states = {item["name"]: item["state"] for item in health["providers"]}
+                    for name in ("local", "query-expansion"):
+                        if states.get(name) == "failed":
+                            sys.exit(f"The model '{name}' failed. See the engine output above.")
+                        if states.get(name) == "missing":
+                            sys.exit(f"The engine could not find the files of the model '{name}' or llama-server.")
+                    if all(states.get(name) == "ready" for name in ("local", "query-expansion")):
                         break
-                    if health["local"] == "failed":
-                        sys.exit("The local model failed. See the engine output above.")
-                    if health["local"] == "missing":
-                        sys.exit("The engine could not find the model or llama-server.")
                 except (urllib.error.URLError, ConnectionError, TimeoutError):
                     pass
                 if time.monotonic() > deadline:
@@ -419,15 +438,22 @@ def smoke_test(args):
                 time.sleep(2)
 
             # The ready route must agree with /health.
-            ready = urllib.request.urlopen(f"{base}/health/ready?provider=local", timeout=5)
-            if ready.status != 200:
-                sys.exit(f"/health/ready?provider=local returned {ready.status}.")
+            for name in ("local", "query-expansion"):
+                ready = urllib.request.urlopen(f"{base}/health/ready?provider={name}", timeout=5)
+                if ready.status != 200:
+                    sys.exit(f"/health/ready?provider={name} returned {ready.status}.")
 
             models = http_json(f"{base}/v1/models")
             ids = [item["id"] for item in models["data"]]
             print(f"Models: {ids}", flush=True)
-            if "local/ministral-3-3b" not in ids:
-                sys.exit("The local model is not listed.")
+            for expected in ("local/ministral-3-3b", "query-expansion/qwen3-0.6b"):
+                if expected not in ids:
+                    sys.exit(f"The model {expected} is not listed.")
+
+            expansion = http_json(f"{base}/v1/query-expansion", {"query": "how to reset a router", "count": 3})
+            print(f"Query expansion: {expansion}", flush=True)
+            if not expansion["queries"] or any(not query.strip() or "<think>" in query for query in expansion["queries"]):
+                sys.exit("The query expansion returned no usable query.")
 
             answer = http_json(f"{base}/v1/chat/completions", {"model": "local/ministral-3-3b", "max_tokens": 16, "messages": prompt})
             text = answer["choices"][0]["message"]["content"]
@@ -574,10 +600,12 @@ def main():
     command.add_argument("--rid", required=True, choices=load_lock("llama-cpp.lock.json")["assets"].keys())
     command.add_argument("--version", required=True, type=version_argument)
     command.add_argument("--output", default=str(ROOT / "artifacts"))
+    command.add_argument("--model-cache", default=str(ROOT / "artifacts" / "cache"), help="The folder for the downloaded query-expansion model.")
     command.set_defaults(run=package)
 
     command = commands.add_parser("fetch-model")
     command.add_argument("--output", default=str(ROOT / "artifacts" / "cache"))
+    command.add_argument("--lock", default="model.lock.json", choices=["model.lock.json", QUERY_EXPANSION_LOCK], help="The lock file of the model. The default is the main model.")
     command.set_defaults(run=fetch_model)
 
     command = commands.add_parser("smoke-test")

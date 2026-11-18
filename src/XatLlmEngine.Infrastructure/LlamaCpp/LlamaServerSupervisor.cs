@@ -28,6 +28,9 @@ internal sealed partial class LlamaServerSupervisor : BackgroundService
     /// <summary>The local model settings.</summary>
     private readonly LlamaCppOptions options;
 
+    /// <summary>The identity of the model that this supervisor runs.</summary>
+    private readonly LlamaModelRole role;
+
     /// <summary>Checks the health of the server.</summary>
     private readonly LlamaHealthProbe probe;
 
@@ -60,6 +63,7 @@ internal sealed partial class LlamaServerSupervisor : BackgroundService
     /// <param name="timeProvider">The clock for delays.</param>
     /// <param name="logger">The log for lifecycle events.</param>
     /// <param name="meterFactory">Creates the meter, or <see langword="null"/> when nothing collects metrics.</param>
+    /// <param name="role">The identity of the model, or <see langword="null"/> for the main model.</param>
     public LlamaServerSupervisor(
         IOptions<LlamaCppOptions> options,
         IHttpClientFactory httpClientFactory,
@@ -67,9 +71,11 @@ internal sealed partial class LlamaServerSupervisor : BackgroundService
         EngineDataFolder dataFolder,
         TimeProvider timeProvider,
         ILogger<LlamaServerSupervisor> logger,
-        IMeterFactory? meterFactory = null)
+        IMeterFactory? meterFactory = null,
+        LlamaModelRole? role = null)
     {
         this.options = options.Value;
+        this.role = role ?? LlamaModelRole.Main;
         probe = new LlamaHealthProbe(httpClientFactory);
         this.gate = gate;
         this.dataFolder = dataFolder;
@@ -81,10 +87,11 @@ internal sealed partial class LlamaServerSupervisor : BackgroundService
         }
 
         meter = meterFactory.Create(MeterName);
-        restarts = meter.CreateCounter<long>("xat_engine.local.restarts", "{restart}", "Restarts of llama-server, by cause: crash or hang.");
-        meter.CreateObservableGauge("xat_engine.local.state", () => new Measurement<int>(1, new KeyValuePair<string, object?>("state", StateTag(snapshot.State))), description: "The state of the local model. The value is 1, with the state as a tag.");
-        meter.CreateObservableGauge("xat_engine.local.active", () => gate.Active, "{request}", "Local requests that have a slot.");
-        meter.CreateObservableGauge("xat_engine.local.queued", () => gate.Queued, "{request}", "Local requests that wait for a slot.");
+        restarts = meter.CreateCounter<long>("xat_engine.local.restarts", "{restart}", "Restarts of llama-server, by model and by cause: crash or hang.");
+        var modelTag = new KeyValuePair<string, object?>("model", this.role.Label);
+        meter.CreateObservableGauge("xat_engine.local.state", () => new Measurement<int>(1, modelTag, new KeyValuePair<string, object?>("state", StateTag(snapshot.State))), description: "The state of a local model. The value is 1, with the model and the state as tags.");
+        meter.CreateObservableGauge("xat_engine.local.active", () => new Measurement<int>(gate.Active, modelTag), "{request}", "Local requests that have a slot, by model.");
+        meter.CreateObservableGauge("xat_engine.local.queued", () => new Measurement<int>(gate.Queued, modelTag), "{request}", "Local requests that wait for a slot, by model.");
     }
 
     /// <summary>The name of the meter. It is the same as the Application meter, so that one tool session shows all values.</summary>
@@ -111,14 +118,14 @@ internal sealed partial class LlamaServerSupervisor : BackgroundService
         if (!File.Exists(program) || !File.Exists(model))
         {
             Publish(new(LlamaServerState.Missing));
-            LogFilesMissing(program, File.Exists(program), model, File.Exists(model));
+            LogFilesMissing(role.Label, program, File.Exists(program), model, File.Exists(model));
             return;
         }
 
         string pidFile;
         try
         {
-            pidFile = dataFolder.File(LlamaServerPidFile.FileName);
+            pidFile = dataFolder.File(role.PidFileName);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
@@ -127,9 +134,14 @@ internal sealed partial class LlamaServerSupervisor : BackgroundService
         }
 
         // The instance lock makes sure that no other engine owns these servers.
-        var legacyPidFile = LlamaServerPidFile.LegacyPidFilePath(program);
-        LlamaServerPidFile.StopLeftoverServer(legacyPidFile, program, logger);
-        LlamaServerPidFile.TryDeletePidFile(legacyPidFile, logger);
+        // The legacy file belongs to the main model. Both models use the same program, so only one of them may read it.
+        if (role.IsMain)
+        {
+            var legacyPidFile = LlamaServerPidFile.LegacyPidFilePath(program);
+            LlamaServerPidFile.StopLeftoverServer(legacyPidFile, program, logger);
+            LlamaServerPidFile.TryDeletePidFile(legacyPidFile, logger);
+        }
+
         LlamaServerPidFile.StopLeftoverServer(pidFile, program, logger);
 
         var crashes = new CrashBudget(timeProvider);
@@ -144,7 +156,7 @@ internal sealed partial class LlamaServerSupervisor : BackgroundService
                 }
                 catch (Exception exception) when (exception is not OperationCanceledException)
                 {
-                    // A failure here must not stop the host, because cloud providers can keep working without the local model.
+                    // A failure here must not stop the host, because the other model can keep working.
                     LogRunFailed(exception);
                     Fail(new("The llama-server run failed unexpectedly. See the engine log.", exception.ToString()));
                     return;
@@ -170,7 +182,7 @@ internal sealed partial class LlamaServerSupervisor : BackgroundService
                     return;
                 }
 
-                restarts?.Add(1, new KeyValuePair<string, object?>("cause", result.Hung ? "hang" : "crash"));
+                restarts?.Add(1, new KeyValuePair<string, object?>("model", role.Label), new KeyValuePair<string, object?>("cause", result.Hung ? "hang" : "crash"));
                 Publish(new(LlamaServerState.Restarting));
                 LogRestarting(RestartDelay);
                 await Task.Delay(RestartDelay, timeProvider, stoppingToken).ConfigureAwait(false);
@@ -211,7 +223,7 @@ internal sealed partial class LlamaServerSupervisor : BackgroundService
     private void Fail(LlamaFailure failure)
     {
         Publish(new(LlamaServerState.Failed, Failure: failure));
-        LogFailed(failure.Detail);
+        LogFailed(role.Label, failure.Detail);
     }
 
     /// <summary>Runs one llama-server process from start to exit.</summary>
@@ -258,7 +270,7 @@ internal sealed partial class LlamaServerSupervisor : BackgroundService
             process.StopKeepingErrors();
             var endpoint = new LlamaServerEndpoint(new Uri(baseUrl, "v1"), apiKey);
             Publish(new(LlamaServerState.Ready, endpoint));
-            LogReady();
+            LogReady(role.Label);
 
             var (cause, hung) = await WatchUntilStoppedAsync(process, baseUrl, endpoint, stoppingToken).ConfigureAwait(false);
 
@@ -309,7 +321,7 @@ internal sealed partial class LlamaServerSupervisor : BackgroundService
             await Task.Delay(HealthPollInterval, timeProvider, stoppingToken).ConfigureAwait(false);
         }
 
-        var message = $"The model did not load within {options.StartupTimeoutSeconds} seconds. Increase LocalModel:StartupTimeoutSeconds, or use a smaller model.";
+        var message = $"The model did not load within {options.StartupTimeoutSeconds} seconds. Increase {role.SectionName}:StartupTimeoutSeconds, or use a smaller model.";
         return new(message, message);
     }
 
@@ -359,12 +371,13 @@ internal sealed partial class LlamaServerSupervisor : BackgroundService
     }
 
     /// <summary>Logs that a required file is missing.</summary>
+    /// <param name="provider">The provider name of the model.</param>
     /// <param name="program">The llama-server path.</param>
     /// <param name="programFound">Whether llama-server exists.</param>
     /// <param name="model">The model path.</param>
     /// <param name="modelFound">Whether the model exists.</param>
-    [LoggerMessage(Level = LogLevel.Warning, Message = "The local provider is off. Server {Program} found: {ProgramFound}. Model {Model} found: {ModelFound}. Download the model from the GitHub release, then restart.")]
-    private partial void LogFilesMissing(string program, bool programFound, string model, bool modelFound);
+    [LoggerMessage(Level = LogLevel.Warning, Message = "The provider {Provider} is off. Server {Program} found: {ProgramFound}. Model {Model} found: {ModelFound}. Download the model from the GitHub release, then restart.")]
+    private partial void LogFilesMissing(string provider, string program, bool programFound, string model, bool modelFound);
 
     /// <summary>Logs a failed process start.</summary>
     /// <param name="exception">The cause.</param>
@@ -379,8 +392,9 @@ internal sealed partial class LlamaServerSupervisor : BackgroundService
     private partial void LogStarted(int pid, int port);
 
     /// <summary>Logs that the model has loaded.</summary>
-    [LoggerMessage(Level = LogLevel.Information, Message = "The local model is ready.")]
-    private partial void LogReady();
+    /// <param name="provider">The provider name of the model.</param>
+    [LoggerMessage(Level = LogLevel.Information, Message = "The model of the provider {Provider} is ready.")]
+    private partial void LogReady(string provider);
 
     /// <summary>Logs a server that answers its health checks again.</summary>
     [LoggerMessage(Level = LogLevel.Information, Message = "llama-server answers its health checks again. New local requests can start.")]
@@ -397,9 +411,10 @@ internal sealed partial class LlamaServerSupervisor : BackgroundService
     private partial void LogExited(int exitCode);
 
     /// <summary>Logs that the local model failed and will not restart.</summary>
+    /// <param name="provider">The provider name of the model.</param>
     /// <param name="cause">The full cause.</param>
-    [LoggerMessage(Level = LogLevel.Error, Message = "The local model failed, and the engine will not start llama-server again until the engine restarts. Cause: {Cause}")]
-    private partial void LogFailed(string cause);
+    [LoggerMessage(Level = LogLevel.Error, Message = "The model of the provider {Provider} failed, and the engine will not start llama-server again until the engine restarts. Cause: {Cause}")]
+    private partial void LogFailed(string provider, string cause);
 
     /// <summary>Logs a server that the engine replaces because it hangs.</summary>
     /// <param name="failedChecks">The number of failed health checks in a row.</param>

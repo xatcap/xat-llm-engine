@@ -11,17 +11,16 @@ internal static class LlamaEnvironment
     /// <summary>The llama.cpp variables outside the name spaces. See <see cref="IsLlamaSetting"/>.</summary>
     private static readonly string[] LlamaNames = ["MODEL_ENDPOINT", "HTTP_PROXY", "HTTPS_PROXY"];
 
-    /// <summary>Removes the engine's secrets and the llama.cpp settings, then adds the key for this run.</summary>
+    /// <summary>Removes the llama.cpp settings, then adds the key for this run.</summary>
     /// <remarks>
-    /// A child process inherits the environment. llama-server has no need for the engine's own secrets.
-    /// llama-server also reads its own variables, and these can turn on options that <see cref="LlamaCppOptions.ExtraArguments"/> does not allow.
+    /// A child process inherits the environment. llama-server reads its own variables, and these can turn on options that <see cref="LlamaCppOptions.ExtraArguments"/> does not allow.
     /// </remarks>
     /// <param name="startInfo">The process settings.</param>
     /// <param name="programFolder">The folder of llama-server, which holds its libraries.</param>
     /// <param name="apiKey">The key for this run. It goes through the environment, because other users on the machine can see the arguments.</param>
     public static void Prepare(ProcessStartInfo startInfo, string programFolder, string apiKey)
     {
-        foreach (var name in startInfo.Environment.Keys.Where(name => IsEngineSecret(name) || IsLlamaSetting(name)).ToList())
+        foreach (var name in startInfo.Environment.Keys.Where(IsLlamaSetting).ToList())
         {
             startInfo.Environment.Remove(name);
         }
@@ -34,13 +33,6 @@ internal static class LlamaEnvironment
             startInfo.Environment["LD_LIBRARY_PATH"] = string.IsNullOrEmpty(existing) ? programFolder : $"{programFolder}:{existing}";
         }
     }
-
-    /// <summary>Tells whether an environment variable holds settings for the engine's cloud providers.</summary>
-    /// <param name="name">The variable's name.</param>
-    /// <returns><see langword="true"/> when the variable must not reach llama-server.</returns>
-    internal static bool IsEngineSecret(string name) =>
-        name.StartsWith("Providers__", StringComparison.OrdinalIgnoreCase)
-        || name.StartsWith("Providers:", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>Tells whether an environment variable holds a llama.cpp setting.</summary>
     /// <remarks>

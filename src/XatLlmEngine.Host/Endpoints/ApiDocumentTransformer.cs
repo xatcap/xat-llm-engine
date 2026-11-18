@@ -24,12 +24,30 @@ internal sealed class ApiDocumentTransformer : IOpenApiDocumentTransformer
         }
     }
 
+    /// <summary>Describes the query-expansion request body with an example that the API accepts.</summary>
+    /// <param name="document">The generated document.</param>
+    private static void DescribeQueryExpansionRequest(OpenApiDocument document)
+    {
+        var body = document.Paths["/v1/query-expansion"].Operations?[HttpMethod.Post].RequestBody as OpenApiRequestBody;
+        if (body is null)
+        {
+            return;
+        }
+
+        body.Description = "The search query, and how many other queries to write. 'count' is optional: the default is 3, and the largest value is 10.";
+        if (body.Content?["application/json"] is OpenApiMediaType media)
+        {
+            media.Example = JsonNode.Parse("""{"query":"how to reset a router","count":3}""");
+        }
+    }
+
     /// <inheritdoc/>
     public Task TransformAsync(OpenApiDocument document, OpenApiDocumentTransformerContext context, CancellationToken cancellationToken)
     {
         document.Info.Title = "xat-llm-engine";
         document.Info.Version = EngineVersion.Value;
         DescribeChatRequest(document);
+        DescribeQueryExpansionRequest(document);
         return Task.CompletedTask;
     }
 }

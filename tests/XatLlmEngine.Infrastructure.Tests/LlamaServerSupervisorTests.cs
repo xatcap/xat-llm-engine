@@ -121,7 +121,7 @@ public sealed class LlamaServerSupervisorTests : IDisposable
         Assert.Empty(none);
     }
 
-    /// <summary>A llama.cpp config file makes the local model fail, because llama-server would read it. The engine itself still starts, so cloud providers continue to work.</summary>
+    /// <summary>A llama.cpp config file makes the local model fail, because llama-server would read it. The engine itself still starts.</summary>
     /// <returns>A task for the test.</returns>
     [Fact]
     public async Task Start_ConfigFileExists_FailsLocalModelOnly()
@@ -400,6 +400,37 @@ public sealed class LlamaServerSupervisorTests : IDisposable
         }
     }
 
+    /// <summary>The query-expansion model has its own PID file. Its supervisor does not stop the server of the main model, although both servers have the same program name.</summary>
+    /// <returns>A task for the test.</returns>
+    [Fact]
+    public async Task Start_QueryExpansionModel_LeavesMainServerRunning()
+    {
+        var program = LlamaServerPaths.ServerProgram(Options());
+        using var mainServer = Process.Start(new ProcessStartInfo(program, ["--port", "0"]) { RedirectStandardOutput = true })!;
+        var folder = new EngineDataFolder(dataFolder);
+        await File.WriteAllTextAsync(folder.File(LlamaServerPidFile.FileName), FormatPidRecord(mainServer), TestContext.Current.CancellationToken);
+        await Task.Delay(500, TestContext.Current.CancellationToken);
+        Assert.False(mainServer.HasExited, "The stand-in must be running, or this test proves nothing.");
+
+        var (supervisor, _) = Create(Options(), LlamaModelRole.QueryExpansion);
+        await supervisor.StartAsync(TestContext.Current.CancellationToken);
+        try
+        {
+            await WaitForAsync(() => supervisor.State == LlamaServerState.Ready);
+
+            Assert.False(mainServer.HasExited);
+            Assert.True(File.Exists(folder.File(LlamaModelRole.QueryExpansion.PidFileName)));
+        }
+        finally
+        {
+            await supervisor.StopAsync(CancellationToken.None);
+            if (!mainServer.HasExited)
+            {
+                mainServer.Kill();
+            }
+        }
+    }
+
     /// <summary>The engine must not kill an ID that now belongs to another program.</summary>
     /// <returns>A task for the test.</returns>
     [Fact]
@@ -477,10 +508,10 @@ public sealed class LlamaServerSupervisorTests : IDisposable
         }
     }
 
-    /// <summary>The server does not receive the engine's own secrets or llama.cpp settings, only the key for this run.</summary>
+    /// <summary>The server does not receive llama.cpp settings from the environment, only the key for this run.</summary>
     /// <returns>A task for the test.</returns>
     [Fact]
-    public async Task Start_EngineHasSecrets_DoesNotPassThemToServer()
+    public async Task Start_EnvironmentHasLlamaSettings_DoesNotPassThemToServer()
     {
         string[] llamaSettings =
         [
@@ -492,7 +523,6 @@ public sealed class LlamaServerSupervisorTests : IDisposable
         var (supervisor, _, _) = Create("--write-environment-to", reportFile);
         try
         {
-            Environment.SetEnvironmentVariable("Providers__test__ApiKey", "cloud-secret");
             foreach (var name in llamaSettings)
             {
                 Environment.SetEnvironmentVariable(name, "llama-setting");
@@ -503,12 +533,10 @@ public sealed class LlamaServerSupervisorTests : IDisposable
             var report = await File.ReadAllTextAsync(reportFile, TestContext.Current.CancellationToken);
 
             Assert.Contains("LLAMA_API_KEY", report, StringComparison.Ordinal);
-            Assert.DoesNotContain("cloud-secret", report, StringComparison.Ordinal);
             Assert.DoesNotContain("llama-setting", report, StringComparison.Ordinal);
         }
         finally
         {
-            Environment.SetEnvironmentVariable("Providers__test__ApiKey", null);
             foreach (var (name, value) in previous)
             {
                 Environment.SetEnvironmentVariable(name, value);
@@ -531,7 +559,7 @@ public sealed class LlamaServerSupervisorTests : IDisposable
         var options = Options();
         var (supervisor, _) = Create(options);
         var http = new StubHttpHandler(System.Net.HttpStatusCode.OK, """{"choices":[{"message":{"content":"Hi"},"finish_reason":"stop"}]}""");
-        var provider = new LocalChatProvider(supervisor, GateOf(supervisor), new OpenAiClient(TestTransports.Create(http, name: "local", kind: ProviderKind.Local)), Microsoft.Extensions.Options.Options.Create(options));
+        var provider = new LocalChatProvider(supervisor, GateOf(supervisor), new OpenAiClient(TestTransports.Create(http, name: "local")), Microsoft.Extensions.Options.Options.Create(options));
         await supervisor.StartAsync(TestContext.Current.CancellationToken);
         try
         {
@@ -722,22 +750,22 @@ public sealed class LlamaServerSupervisorTests : IDisposable
 
     /// <summary>Creates the supervisor and local provider.</summary>
     /// <param name="options">The settings.</param>
+    /// <param name="role">The identity of the model, or <see langword="null"/> for the main model.</param>
     /// <returns>The objects under test.</returns>
-    private (LlamaServerSupervisor Supervisor, LocalChatProvider Provider) Create(LlamaCppOptions options)
+    private (LlamaServerSupervisor Supervisor, LocalChatProvider Provider) Create(LlamaCppOptions options, LlamaModelRole? role = null)
     {
         var services = new ServiceCollection();
         services.AddHttpClient(DependencyInjection.LocalHttpClientName, client => client.Timeout = Timeout.InfiniteTimeSpan);
         var factory = services.BuildServiceProvider().GetRequiredService<IHttpClientFactory>();
         var wrapped = Microsoft.Extensions.Options.Options.Create(options);
         var requestGate = new LocalRequestGate(options.EffectiveParallel, options.MaxQueuedRequests, TimeProvider.System);
-        var supervisor = new LlamaServerSupervisor(wrapped, factory, requestGate, new EngineDataFolder(dataFolder), TimeProvider.System, NullLogger<LlamaServerSupervisor>.Instance);
+        var supervisor = new LlamaServerSupervisor(wrapped, factory, requestGate, new EngineDataFolder(dataFolder), TimeProvider.System, NullLogger<LlamaServerSupervisor>.Instance, role: role);
         gates[supervisor] = requestGate;
         var client = new OpenAiClient(new ProviderTransport(
-            new TransportSettings("local", ProviderKind.Local, DependencyInjection.LocalHttpClientName, RequestTimeout: null, ReadIdleTimeout: null),
+            new TransportSettings(role?.ProviderName ?? "local", DependencyInjection.LocalHttpClientName),
             factory,
-            TimeProvider.System,
             NullLogger.Instance));
-        return (supervisor, new LocalChatProvider(supervisor, requestGate, client, wrapped));
+        return (supervisor, new LocalChatProvider(supervisor, requestGate, client, wrapped, role));
     }
 
     /// <summary>Gets the request gate of a supervisor.</summary>

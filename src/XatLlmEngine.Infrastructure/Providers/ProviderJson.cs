@@ -1,16 +1,14 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using XatLlmEngine.Infrastructure.Providers.OpenAiCompatible;
 
 namespace XatLlmEngine.Infrastructure.Providers;
 
-/// <summary>Source-generated JSON handling for every provider wire type. The protocol uses snake_case.</summary>
+/// <summary>Source-generated JSON handling for shared provider error envelopes. The default envelope uses snake_case.</summary>
 [JsonSourceGenerationOptions(
     PropertyNamingPolicy = JsonKnownNamingPolicy.SnakeCaseLower,
     DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
     PropertyNameCaseInsensitive = true)]
 [JsonSerializable(typeof(UpstreamErrorEnvelope))]
-[JsonSerializable(typeof(OpenAiChatResponse))]
 internal sealed partial class ProviderJson : JsonSerializerContext;
 
 /// <summary>The error body shared by the OpenAI and llama-server protocols.</summary>

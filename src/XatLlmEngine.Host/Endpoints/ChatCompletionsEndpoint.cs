@@ -41,38 +41,10 @@ internal static class ChatCompletionsEndpoint
         var cancellationToken = context.RequestAborted;
         try
         {
-            // The engine requires JSON content because browsers cannot send it across sites without a CORS approval, which the engine never gives.
-            if (!context.Request.HasJsonContentType())
-            {
-                return ErrorMapping.UnsupportedMediaType();
-            }
-
-            var limit = apiOptions.Value.MaxRequestBodyBytes;
-            var content = await ReadBodyAsync(context.Request, limit, cancellationToken).ConfigureAwait(false);
-            if (content is null)
-            {
-                return ErrorMapping.RequestTooLarge(limit);
-            }
-
-            JsonObject? body;
-            try
-            {
-                var node = JsonNode.Parse(content.AsSpan());
-                body = node as JsonObject;
-
-                // The JSON parser checks JSON only at first use. Without this check, a problem causes a later 500 error, possibly after the provider call.
-                // ReadAll finds a repeated field name. ToJsonString finds a string that is not valid UTF-16, for example a lone "\ud83d".
-                ReadAll(body);
-                _ = body?.ToJsonString();
-            }
-            catch (Exception exception) when (exception is JsonException or ArgumentException or InvalidOperationException)
-            {
-                return ErrorMapping.ToResult(context, new EngineError(ErrorKind.InvalidRequest, "The request body is not valid JSON."));
-            }
-
+            var (body, failure) = await RequestBody.ReadObjectAsync(context, apiOptions.Value.MaxRequestBodyBytes, cancellationToken).ConfigureAwait(false);
             if (body is null)
             {
-                return ErrorMapping.ToResult(context, new EngineError(ErrorKind.InvalidRequest, "The request body must be a JSON object."));
+                return failure!;
             }
 
             var isStream = false;
@@ -97,54 +69,6 @@ internal static class ChatCompletionsEndpoint
         {
             // The caller disconnected, so nobody is left to answer.
             return Results.Empty;
-        }
-    }
-
-    /// <summary>Reads the request body, up to a limit. The body is read in full, so that the JSON parser can check all of it.</summary>
-    /// <param name="request">The request.</param>
-    /// <param name="limit">The largest body to accept, in bytes.</param>
-    /// <param name="cancellationToken">Stops reading when the caller disconnects.</param>
-    /// <returns>The body, or <see langword="null"/> when it is larger than the limit.</returns>
-    private static async Task<byte[]?> ReadBodyAsync(HttpRequest request, long limit, CancellationToken cancellationToken)
-    {
-        if (request.ContentLength > limit)
-        {
-            return null;
-        }
-
-        using var buffer = new MemoryStream();
-        var block = new byte[81920];
-        int read;
-        while ((read = await request.Body.ReadAsync(block, cancellationToken).ConfigureAwait(false)) > 0)
-        {
-            if (buffer.Length + read > limit)
-            {
-                return null;
-            }
-
-            buffer.Write(block, 0, read);
-        }
-
-        return buffer.ToArray();
-    }
-
-    /// <summary>Opens every nested object and array, which fails on a repeated field name.</summary>
-    /// <param name="node">The JSON value.</param>
-    private static void ReadAll(JsonNode? node)
-    {
-        if (node is JsonObject fields)
-        {
-            foreach (var field in fields)
-            {
-                ReadAll(field.Value);
-            }
-        }
-        else if (node is JsonArray items)
-        {
-            foreach (var item in items)
-            {
-                ReadAll(item);
-            }
         }
     }
 

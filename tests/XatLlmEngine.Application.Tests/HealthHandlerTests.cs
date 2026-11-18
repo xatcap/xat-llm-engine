@@ -31,7 +31,7 @@ public class HealthHandlerTests
     [Fact]
     public void Handle_DisabledProvider_IsListedOnly()
     {
-        var health = new GetHealthHandler(new ProviderRegistry([new FakeChatProvider("cloud")]), new Disabled("off")).Handle(stopping: false);
+        var health = new GetHealthHandler(new ProviderRegistry([new FakeChatProvider("local")]), new Disabled("off")).Handle(stopping: false);
 
         Assert.Equal(OverallHealth.Healthy, health.Overall);
         Assert.Equal(ProviderState.Disabled, health.Providers.Single(provider => provider.Name == "off").Status.State);
@@ -41,10 +41,10 @@ public class HealthHandlerTests
     [Fact]
     public void Handle_Stopping_IsUnhealthy()
     {
-        var health = new GetHealthHandler(new ProviderRegistry([new FakeChatProvider("cloud")]), new Disabled()).Handle(stopping: true);
+        var health = new GetHealthHandler(new ProviderRegistry([new FakeChatProvider("local")]), new Disabled()).Handle(stopping: true);
 
         Assert.Equal(OverallHealth.Unhealthy, health.Overall);
-        Assert.False(GetHealthHandler.IsReady(health, "cloud"));
+        Assert.False(GetHealthHandler.IsReady(health, "local"));
     }
 
     /// <summary>A fixed list of disabled providers.</summary>

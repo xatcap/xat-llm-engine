@@ -4,7 +4,7 @@ This page describes the architecture of `xat-llm-engine`, its four layers, the i
 
 ## System overview
 
-The engine is a local HTTP server that a desktop app runs on the user's machine. It gives callers one local API for a supervised `llama-server` child process and for cloud vendors.
+The engine is a local HTTP server that a desktop app runs on the user's machine. It gives callers one local API for two supervised `llama-server` child processes. There is one process for each local model.
 
 ```mermaid
 flowchart LR
@@ -15,9 +15,8 @@ flowchart LR
         Infra["Infrastructure Layer"]
         Domain["Domain Layer"]
     end
-    Llama["llama-server (Child Process)"]
-    Cloud["Cloud Vendor APIs (OpenAI, Mistral)"]
-    Disk["Data Folder (instance.lock, llama-server.pid)"]
+    Llama["llama-server (Child Process, one per model)"]
+    Disk["Data Folder (instance.lock, llama-server.pid, llama-server-query-expansion.pid)"]
 
     Caller -->|"HTTP (Loopback)"| Host
     Host --> App
@@ -25,7 +24,6 @@ flowchart LR
     Infra --> App
     Infra --> Domain
     Infra -->|"HTTP (Loopback)"| Llama
-    Infra -->|"HTTPS"| Cloud
     Infra -->|"File I/O"| Disk
 ```
 
@@ -36,7 +34,7 @@ The codebase follows Clean Architecture. Source-code dependencies point inward o
 ```mermaid
 flowchart TB
     subgraph HostLayer["XatLlmEngine.Host (HTTP API, Lifecycle, Composition Root)"]
-        subgraph InfraLayer["XatLlmEngine.Infrastructure (Cloud Adapters, llama-server Supervision, Storage)"]
+        subgraph InfraLayer["XatLlmEngine.Infrastructure (Local Model Adapters, llama-server Supervision, Storage)"]
             subgraph AppLayer["XatLlmEngine.Application (Use Cases, Routing, Policies, Ports)"]
                 DomainLayer["XatLlmEngine.Domain (Value Objects, Errors, Results)"]
             end
@@ -56,8 +54,8 @@ flowchart LR
 | Layer | Project | May reference | Purpose |
 |---|---|---|---|
 | Domain | `src/XatLlmEngine.Domain` | Nothing | Core types, value objects, error categories and results. |
-| Application | `src/XatLlmEngine.Application` | `Domain` | Use cases, routing, request validation, cost policies, telemetry and ports. |
-| Infrastructure | `src/XatLlmEngine.Infrastructure` | `Application`, `Domain` | Provider adapters, HTTP transport, `llama-server` supervision and file storage. |
+| Application | `src/XatLlmEngine.Application` | `Domain` | Use cases, routing, request validation, token policies, telemetry and ports. |
+| Infrastructure | `src/XatLlmEngine.Infrastructure` | `Application`, `Domain` | Local model adapters, HTTP client for `llama-server`, `llama-server` supervision and file storage. |
 | Host | `src/XatLlmEngine.Host` | `Application`, `Infrastructure` | HTTP endpoints, wire contracts, error mapping, lifecycle services and dependency injection. |
 
 ### Domain layer (`XatLlmEngine.Domain`)
@@ -66,20 +64,22 @@ The Domain layer has no framework references and performs no I/O. It holds the t
 
 - `ModelReference`: parses and validates a `provider/model` string.
 - `Result<T>`: represents the outcome of an operation that can fail in an expected way.
-- `EngineError` and `ErrorKind`: describe expected failures in business terms (`InvalidRequest`, `NotFound`, `RateLimited`, `Unavailable`, `Upstream` and `Overloaded`), with an optional `RetryAfter` wait.
+- `EngineError` and `ErrorKind`: describe expected failures in business terms (`InvalidRequest`, `NotFound`, `Unavailable`, `Upstream` and `Overloaded`), with an optional `RetryAfter` wait.
 - `TokenUsage`: holds input, output and total token counts.
 - `FinishReason`: gives the reason why generation ended (`Stop`, `Length` or `ContentFilter`).
 
 ### Application layer (`XatLlmEngine.Application`)
 
-The Application layer orchestrates the use cases and enforces provider-independent rules:
+The Application layer orchestrates the use cases and enforces rules that do not depend on the model runtime:
 
 - **Ports (`Abstractions/`)**:
-  - `IChatProvider`: the port for any source of chat answers. It exposes the provider's name, models, request template (`RequestFields`), output token limit (`MaxTokensLimit`), health status, `CompleteAsync` and `StreamAsync`.
+  - `IChatProvider`: the port for a source of chat answers. It exposes the provider's name, models, request template (`RequestFields`), token-limit fields (`TokenLimitFields`), output-token limit (`MaxTokensLimit`) and health status. It also provides `ShouldForwardStreamUsage`, `CompleteAsync` and `StreamAsync`.
+  - `ProviderNames`: the names of the local providers, `local` (chat) and `query-expansion`.
   - `IDisabledProviders`: lists configured providers that are turned off.
 - **Use cases (`Features/`)**:
   - `CompleteChatHandler`: validates a chat command, calls the provider for a complete answer, and records metrics and traces.
   - `StreamChatHandler`: validates a chat command, starts the provider stream, and reads the first chunk before it returns.
+  - `ExpandQueryHandler`: checks the query and the count, adds the engine's prompt, calls `CompleteChatHandler` for the query-expansion model, and cleans the answer into a list of queries.
   - `ListModelsHandler`: returns the advertised models from all enabled providers in configuration order.
   - `GetHealthHandler`: combines the status of each enabled and disabled provider into `EngineHealth`.
 - **Routing and policies (`Features/CompleteChat/`)**:
@@ -92,14 +92,15 @@ The Application layer orchestrates the use cases and enforces provider-independe
 
 The Infrastructure layer implements the Application ports. All adapter classes are `internal sealed`, so outer code can reach them only through their ports and `AddInfrastructure()`:
 
-- **Cloud adapters (`Providers/`)**:
-  - `OpenAiCompatibleChatProvider`: implements `IChatProvider` for OpenAI-format services (`openai`, `mistral` and custom providers).
-  - `OpenAiClient`: speaks the OpenAI chat completions protocol. Both `OpenAiCompatibleChatProvider` and `LocalChatProvider` share this client.
-  - `ProviderTransport` and `HttpFailure`: send HTTP requests without retries, enforce header and idle-read time limits, cap response sizes, read SSE streams, and translate HTTP and network failures into `EngineError`.
+- **HTTP client for `llama-server` (`Providers/`)**:
+  - `ProviderTransport`, `HttpFailure` and `ProviderJson`: send HTTP requests to `llama-server` without retries, cap the size of the response, read SSE streams, and translate HTTP and network failures into `EngineError`.
+  - `Providers/OpenAiCompatible/`: holds `OpenAiClient` and `OpenAiWire`. They build the requests and read the answers in the OpenAI chat format, which `llama-server` speaks. Both local models share `OpenAiClient`.
 - **Local model supervision (`LlamaCpp/`)**:
-  - `LocalChatProvider`: implements `IChatProvider` for the `local` provider. It checks the model name, acquires a slot from `LocalRequestGate`, sets the default temperature, and calls `OpenAiClient`.
-  - `LlamaServerSupervisor`: a background service that starts `llama-server` on a free loopback port with a per-run API key, polls its health, and restarts it after crashes or hangs.
-  - `LocalRequestGate`: limits active requests to `LocalModel:Parallel` and queues waiting requests up to `LocalModel:MaxQueuedRequests`.
+  - `LlamaModelRole`: the identity of one local model. It holds the provider name, the settings section, the PID file name and the metric label. There are two roles: `Main` (`local`, settings in `LocalModel`) and `QueryExpansion` (`query-expansion`, settings in `QueryExpansionModel`).
+  - `LocalChatProvider`: implements `IChatProvider` for one local model. It checks the model name, acquires a slot from its `LocalRequestGate`, sets the default temperature, and calls `OpenAiClient`.
+  - `LlamaServerSupervisor`: a background service that runs one model. It starts `llama-server` on a free loopback port with a per-run API key, polls its health, writes its PID file, and restarts it after crashes or hangs.
+  - `LocalRequestGate`: limits active requests to `Parallel` and queues waiting requests up to `MaxQueuedRequests`. Each model has its own gate.
+  - `QueryExpansionOptions`: the settings of the query-expansion model. They use the same keys as `LocalModel`, with different defaults.
   - `HangWatch` and `CrashBudget`: decide when an unresponsive `llama-server` must be replaced and stop restarts after 3 crashes in 10 minutes.
   - `LlamaServerProcess` and `ChildProcessJob`: start `llama-server` with a clean environment and bind it to a Windows job object when running on Windows.
 - **Engine state and storage**:
@@ -113,10 +114,13 @@ The Host layer is the entry point and the composition root:
 - `Program.cs`: checks the listening address with `ListenAddressPolicy`, registers options, services and middleware, maps the HTTP routes, and starts the web server.
 - **Endpoints (`Endpoints/`)**:
   - `ChatCompletionsEndpoint`: handles `POST /v1/chat/completions` for complete and streamed answers.
+  - `QueryExpansionEndpoint`: handles `POST /v1/query-expansion`. It accepts only the fields `query` and `count`.
+  - `RequestBody`: reads the JSON object of a request. The chat and the query-expansion routes both use it.
   - `ModelsEndpoint`: handles `GET /v1/models`.
   - `HealthEndpoints`: handles `GET /health`, `GET /health/live` and `GET /health/ready`.
 - **Contracts and error mapping (`Contracts/`)**:
   - `ErrorMapping`: maps every `EngineError` and HTTP status to the unified `{"error":{"message","type"}}` body and sets the `Retry-After` header.
+  - `QueryExpansionContracts`: the wire types of the query-expansion route, for the API document.
   - `HostJson`: source-generated JSON serialization context for wire contracts.
 - **Lifecycle and diagnostics (`Lifecycle/`, `Diagnostics/`)**:
   - `ReadyFileWriter`: writes the address, process ID and version to `Engine:ReadyFile` when the API starts, and deletes the file on stop.
@@ -127,20 +131,20 @@ The Host layer is the entry point and the composition root:
 
 The layers interact through explicit method calls and ports:
 
-1. **Composition at startup**: `Host` calls `AddApplication()` and `AddInfrastructure(configuration)` in `Program.cs`. `Infrastructure` validates all settings at startup, registers `IChatProvider` and `IDisabledProviders`, and starts its background services. `Host` never references adapter classes in `XatLlmEngine.Infrastructure.LlamaCpp` or `XatLlmEngine.Infrastructure.Providers`.
-2. **Inbound calls (`Host` to `Application`)**: HTTP endpoints in `Host` read and validate the HTTP framing (content type, body size and JSON syntax), build an Application command, and call a handler (`CompleteChatHandler`, `StreamChatHandler`, `ListModelsHandler` or `GetHealthHandler`).
+1. **Composition at startup**: `Host` calls `AddApplication()` and `AddInfrastructure(configuration)` in `Program.cs`. `Infrastructure` validates the `LocalModel` and `QueryExpansionModel` settings at startup. It registers `IChatProvider` and `IDisabledProviders`, and starts the background services. `Host` never references adapter classes in `XatLlmEngine.Infrastructure.LlamaCpp` or `XatLlmEngine.Infrastructure.Providers`.
+2. **Inbound calls (`Host` to `Application`)**: HTTP endpoints in `Host` read and validate the HTTP framing (content type, body size and JSON syntax), build an Application command, and call a handler (`CompleteChatHandler`, `StreamChatHandler`, `ExpandQueryHandler`, `ListModelsHandler` or `GetHealthHandler`).
 3. **Domain rules (`Application` to `Domain`)**: Application handlers and policies use `Domain` types (`ModelReference`, `Result<T>`, `EngineError`, `TokenUsage` and `FinishReason`) to represent routing, validation and results without transport details.
-4. **Outbound calls (`Application` to `Infrastructure` via ports)**: Application handlers call `IChatProvider`. The `Infrastructure` adapters translate between vendor wire protocols (or `llama-server`) and the Application/Domain types. Expected external failures never cross the port as raw HTTP exceptions. Adapters return `Result<T>.Fail(EngineError)` before a stream starts, or throw `ChatStreamException(EngineError)` when a stream breaks after it starts.
+4. **Outbound calls (`Application` to `Infrastructure` via ports)**: Application handlers call `IChatProvider`. The `Infrastructure` adapters translate between the `llama-server` wire format and the Application/Domain types. Expected external failures never cross the port as raw HTTP exceptions. Adapters return `Result<T>.Fail(EngineError)` before a stream starts, or throw `ChatStreamException(EngineError)` when a stream breaks after it starts.
 
 ```mermaid
 flowchart TB
     subgraph Host["Host Layer"]
-        Endpoint["HTTP Endpoint (ChatCompletionsEndpoint / HealthEndpoints / ModelsEndpoint)"]
+        Endpoint["HTTP Endpoint (ChatCompletionsEndpoint / QueryExpansionEndpoint / HealthEndpoints / ModelsEndpoint)"]
         Mapper["ErrorMapping & Wire Contracts"]
     end
 
     subgraph Application["Application Layer"]
-        Handler["Use Case Handler (CompleteChatHandler / StreamChatHandler / GetHealthHandler)"]
+        Handler["Use Case Handler (CompleteChatHandler / StreamChatHandler / ExpandQueryHandler / GetHealthHandler)"]
         Router["ChatRouter & TokenLimitPolicy"]
         Port["Ports (IChatProvider, IDisabledProviders)"]
     end
@@ -150,7 +154,7 @@ flowchart TB
     end
 
     subgraph Infrastructure["Infrastructure Layer"]
-        Adapter["Adapters (LocalChatProvider, OpenAiCompatibleChatProvider)"]
+        Adapter["Adapter (LocalChatProvider)"]
         Transport["ProviderTransport & LlamaServerSupervisor"]
     end
 
@@ -173,8 +177,8 @@ sequenceDiagram
     participant Parent as Parent App / User
     participant Host as Program & Host Services
     participant Lock as EngineInstanceLock
-    participant Sup as LlamaServerSupervisor
-    participant Llama as llama-server
+    participant Sup as LlamaServerSupervisors (one per model)
+    participant Llama as llama-server (one per model)
 
     Parent->>Host: Start process
     Host->>Host: ListenAddressPolicy checks loopback URL
@@ -193,14 +197,14 @@ sequenceDiagram
 ```
 
 1. `ListenAddressPolicy` verifies that the listening address is on loopback before the host builds.
-2. `DependencyInjection.AddInfrastructure` validates `Engine`, `LocalModel` and `Providers` settings. Any invalid setting stops the process at once.
+2. `DependencyInjection.AddInfrastructure` validates the `LocalModel` and `QueryExpansionModel` settings. Any invalid setting stops the process at once.
 3. `EngineInstanceLock` acquires an exclusive file lock on `instance.lock` in `EngineDataFolder` before other hosted services start.
 4. When Kestrel starts listening, `ReadyFileWriter` atomically writes `{"url","pid","version"}` to `Engine:ReadyFile`.
 5. If `Engine:StopWhenInputCloses` is `true`, `InputCloseWatcher` waits for standard input to close and then triggers a clean stop.
 
 ### Local model supervision and load components
 
-`LocalChatProvider`, `LocalRequestGate` and `LlamaServerSupervisor` work together to manage the local model:
+`LocalChatProvider`, `LocalRequestGate` and `LlamaServerSupervisor` work together to manage one local model. The engine creates this set of components for each enabled model:
 
 ```mermaid
 flowchart LR
@@ -225,17 +229,27 @@ flowchart LR
     Watch -->|"Read Active & progress"| Gate
 ```
 
-- **Slot and queue gate**: `LocalRequestGate` lets at most `LocalModel:Parallel` requests run at the same time. Additional requests wait in a queue up to `LocalModel:MaxQueuedRequests`. If the queue is full, `EnterAsync` returns `ErrorKind.Overloaded` (HTTP 503) at once.
+- **Slot and queue gate**: `LocalRequestGate` lets at most `Parallel` requests run at the same time. Additional requests wait in a queue up to `MaxQueuedRequests`. If the queue is full, `EnterAsync` returns `ErrorKind.Overloaded` (HTTP 503) at once.
 - **Health and hang detection**: `LlamaServerSupervisor` polls `llama-server` with `LlamaHealthProbe` every `HealthCheckIntervalSeconds`. Every completed answer and every streamed chunk calls `gate.ReportProgress()`.
   - If `llama-server` fails 3 health checks in a row while no request runs, `HangWatch` tells the supervisor to restart it.
   - If `llama-server` fails 3 health checks while a request runs, the state becomes `Unresponsive`. New requests get HTTP 503, while active requests continue as long as `llama-server` sends data.
   - If an `Unresponsive` server sends no data for `UnresponsiveTimeoutSeconds`, `HangWatch` tells the supervisor to restart it.
 - **Crash budget**: If `llama-server` fails during initial load, the supervisor sets the state to `Failed` and does not retry. If `llama-server` crashes after it became `Ready`, `CrashBudget` allows restarts until 3 crashes occur within 10 minutes, after which the state becomes `Failed` (HTTP 502).
 
-### Cloud provider and cost-control components
+### Two local models
 
-- **Protocol adapter and transport**: `OpenAiCompatibleChatProvider` uses `OpenAiClient` and sends requests through `ProviderTransport`. `ProviderTransport` disables HTTP redirects, enforces `RequestTimeoutSeconds` on response headers, wraps the response stream in an `IdleTimeoutStream` (`ReadIdleTimeoutSeconds`) and a `SizeLimitedStream` (16 MiB), and maps HTTP errors with `HttpFailure`.
-- **Per-request token limit**: `TokenLimitPolicy` enforces `MaxTokensLimit` before a request reaches the provider. It validates the provider's token field (`max_tokens` or `max_completion_tokens`) or inserts `MaxTokensLimit` when the caller sent no token field.
+The chat model and the query-expansion model run at the same time. They do not share a process, a queue or a PID file:
+
+- Each model has its own `llama-server` process, `LocalRequestGate` and `LlamaServerSupervisor`.
+- Each model has its own PID file in the data folder: `llama-server.pid` for `local`, and `llama-server-query-expansion.pid` for `query-expansion`. A supervisor stops only the server that its own PID file names.
+- The `llama-server` metrics have a `model` tag. Its value is `local` or `query-expansion`.
+- Both models load when the engine starts, and both stay in memory while the engine runs. The chat model file is about 2 GiB. The query-expansion model file is about 380 MiB. The memory use can be higher than the file size, because the context cache also uses memory. The cache grows with `ContextSize` and `Parallel`. This page gives file sizes only. Measure the memory use on the target machine with the real models.
+- `QueryExpansionModel:Enabled` set to `false` turns the query-expansion model off. Then `/v1/query-expansion` returns 503. The chat model keeps working.
+
+## Token limit and query expansion components
+
+- **Per-request token limit**: `TokenLimitPolicy` enforces `MaxTokensLimit` before a request reaches `llama-server`. It checks every field from the provider's `TokenLimitFields` that `RequestFields` also lists. When the caller sent no token field, it sets the first matching field to `MaxTokensLimit`. The query-expansion model has a limit of 256 tokens by default.
+- **Query expansion**: `ExpandQueryHandler` writes a short instruction and the caller's query as the messages. It then calls `CompleteChatHandler`, so the query-expansion model uses the same routing, token limit, metrics and error mapping as chat. The handler then reads the answer. It removes thinking blocks, list markers, quotes and lines that end with a colon. It also removes repeated queries and a copy of the original query. If the model stopped at the token limit, the handler drops the last line, because it can be incomplete.
 
 ## Flow of data
 
@@ -247,7 +261,7 @@ sequenceDiagram
     participant Endpoint as ChatCompletionsEndpoint
     participant Handler as CompleteChatHandler
     participant Router as ChatRouter
-    participant Provider as IChatProvider (Local or Cloud)
+    participant Provider as IChatProvider (LocalChatProvider)
     participant Telemetry as EngineTelemetry
 
     Caller->>Endpoint: POST /v1/chat/completions (JSON)
@@ -266,7 +280,7 @@ sequenceDiagram
 
 1. **HTTP intake**: `RequestIdMiddleware` assigns `X-Request-Id`. `ChatCompletionsEndpoint` checks that `Content-Type` is `application/json`, reads the body up to `Api:MaxRequestBodyBytes` (20 MiB), parses the `JsonObject`, and verifies that there are no duplicate keys or invalid UTF-16 strings.
 2. **Routing and token limit**: `ChatRouter.Route` parses `model` into `provider/model` and looks up the provider in `ProviderRegistry`. It checks every top-level field against `model`, `stream` and the provider's `RequestFields`. `ChatRouter` clones the JSON body and runs `TokenLimitPolicy.Apply` to validate or insert `MaxTokensLimit`.
-3. **Provider execution**: `CompleteChatHandler` starts an `EngineTelemetry` measurement and calls `IChatProvider.CompleteAsync`. The provider sends the request body over `ProviderTransport` to `llama-server` or the cloud vendor API, then maps the response into a Domain `ChatCompletion` (`Content`, `FinishReason`, `TokenUsage`).
+3. **Provider execution**: `CompleteChatHandler` starts an `EngineTelemetry` measurement and calls `IChatProvider.CompleteAsync`. The provider sends the request body over `ProviderTransport` to `llama-server`, then maps the response into a Domain `ChatCompletion` (`Content`, `FinishReason`, `TokenUsage`).
 4. **Telemetry and response**: `CompleteChatHandler` finishes the `EngineTelemetry` measurement and records the reported input and output tokens. `ChatCompletionsEndpoint` writes the `ChatCompletionResponse` JSON and logs one summary line.
 
 ### 2. Streamed chat request (`stream: true`)
@@ -302,16 +316,24 @@ sequenceDiagram
     end
     Endpoint-->>Caller: data: [DONE]
     Endpoint->>Answer: DisposeAsync()
-    Answer->>Telemetry: Record outcome & tokens, free local slot / HTTP connection
+    Answer->>Telemetry: Record outcome & tokens, free local slot
 ```
 
-1. **First-piece commit**: `StreamChatHandler` routes the request, starts an `EngineTelemetry` measurement, calls `provider.StreamAsync`, and calls `MoveNextAsync()` to read the first `ChatChunk` before it returns. If an error occurs before the first chunk and before `StreamCommitSeconds` elapses, `ChatCompletionsEndpoint` returns a normal HTTP error status code (such as 400, 429, 502 or 503).
+1. **First-piece commit**: `StreamChatHandler` routes the request, starts an `EngineTelemetry` measurement, calls `provider.StreamAsync`, and calls `MoveNextAsync()` to read the first `ChatChunk` before it returns. If an error occurs before the first chunk and before `StreamCommitSeconds` elapses, `ChatCompletionsEndpoint` returns a normal HTTP error status code (such as 400, 502 or 503).
 2. **Keep-alive timer**: While `ChatCompletionsEndpoint` waits for `StreamChatHandler`, `KeepAliveUntilAsync` watches `Api:StreamCommitSeconds` (15 seconds by default). If the first chunk has not arrived by then, the endpoint commits HTTP 200 (`text/event-stream`) and sends `: keep-alive` comments every 15 seconds.
 3. **Chunk forwarding**: Once the first chunk arrives, `ChatCompletionsEndpoint` sends an initial assistant role chunk, then iterates `StreamedAnswer.ReadAsync()` to send each content delta and finish reason as an SSE `data:` event.
-4. **Usage and completion**: For providers whose template includes `stream_options`, `OpenAiClient` always requests `stream_options.include_usage = true` so the engine can record token metrics and logs. `StreamedAnswer` forwards the final usage chunk to the caller only when the caller set `stream_options.include_usage` to `true`. The endpoint then sends `data: [DONE]`.
+4. **Usage and completion**: `StreamChatHandler` calls `IChatProvider.ShouldForwardStreamUsage(body)` to decide whether the caller receives the final usage chunk. When a template includes `stream_options`, `OpenAiClient` always requests `stream_options.include_usage = true` for token metrics and logs. In that case, `ShouldForwardStreamUsage` returns `true` only when the caller set `stream_options.include_usage` to `true`. The endpoint then sends `data: [DONE]`.
 5. **Mid-stream failure and cleanup**: If a failure happens after HTTP 200 was sent, `ChatCompletionsEndpoint` catches `ChatStreamException`, writes `data: {"error":{"message","type"}}`, and omits `[DONE]`. Disposing `StreamedAnswer` finishes the `EngineTelemetry` measurement, returns the HTTP connection to the pool, and releases the `LocalRequestGate` slot.
 
-### 3. Error flow
+### 3. Query expansion request (`POST /v1/query-expansion`)
+
+1. **HTTP intake**: `QueryExpansionEndpoint` reads the body with `RequestBody`. It checks the `Content-Type`, the body size and the JSON syntax. It then rejects any field other than `query` and `count`, and any value of the wrong type.
+2. **Prompt and use case**: `ExpandQueryHandler` checks that `query` has from 1 to 1000 characters and that `count` is from 1 to 10. It builds the messages and calls `CompleteChatHandler` with the model `query-expansion/qwen3-0.6b`.
+3. **Chat path**: The chat path routes the request, applies the token limit of the query-expansion model, acquires a slot from its `LocalRequestGate`, and calls `llama-server`. The same error rules apply as for chat.
+4. **Cleaning the answer**: `ExpandQueryHandler` reads the text of the answer and returns up to `count` new queries.
+5. **Response**: The endpoint returns `{"queries": [...], "model": "query-expansion/qwen3-0.6b"}` with status 200. A failure returns the error mapping of the [error flow](#4-error-flow).
+
+### 4. Error flow
 
 ```mermaid
 flowchart LR
@@ -328,7 +350,6 @@ flowchart LR
 ```
 
 - Every expected failure in `Application` or `Infrastructure` becomes an `EngineError` with one `ErrorKind`.
-- `ErrorMapping` in `Host` maps `ErrorKind` to one HTTP status code and one error type string (`invalid_request_error`, `not_found_error`, `rate_limit_error`, `upstream_error`, `service_unavailable_error` or `overloaded_error`).
-- For temporary failures (`RateLimited`, `Unavailable` and `Overloaded`), `ErrorMapping` sets the `Retry-After` response header.
+- `ErrorMapping` in `Host` maps `ErrorKind` to one HTTP status code and one error type string (`invalid_request_error`, `not_found_error`, `upstream_error`, `service_unavailable_error` or `overloaded_error`).
+- For temporary failures (`Unavailable` and `Overloaded`), `ErrorMapping` sets the `Retry-After` response header.
 - Unexpected exceptions are caught by the global exception handler in `Program.cs`, logged with the request's `X-Request-Id`, and returned as HTTP 500 `internal_error` without internal details.
-

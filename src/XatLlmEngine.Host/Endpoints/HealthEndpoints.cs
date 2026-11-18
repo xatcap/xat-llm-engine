@@ -7,8 +7,8 @@ namespace XatLlmEngine.Host.Endpoints;
 /// <summary>Implements the health routes. See ADR 0010.</summary>
 internal static class HealthEndpoints
 {
-    /// <summary>The name of the local provider.</summary>
-    private const string LocalName = "local";
+    /// <summary>The name of the main local provider.</summary>
+    private const string LocalName = ProviderNames.Local;
 
     /// <summary>Maps <c>/health</c>, <c>/health/live</c> and <c>/health/ready</c>.</summary>
     /// <param name="app">The application.</param>
@@ -106,19 +106,23 @@ internal static class HealthEndpoints
     /// <param name="name">The provider's name.</param>
     /// <param name="state">The state.</param>
     /// <returns>The explanation.</returns>
-    private static string Describe(string name, ProviderState state) => (name == LocalName, state) switch
+    private static string Describe(string name, ProviderState state)
     {
-        (true, ProviderState.Ready) => "The local model is ready.",
-        (true, ProviderState.Busy) => "The local model is ready, and all its slots are in use. New requests wait in the queue.",
-        (true, ProviderState.Starting) => "The local model is loading. Local requests return 503 until it is ready.",
-        (true, ProviderState.Restarting) => "llama-server stopped unexpectedly, and the engine is restarting it. Local requests return 503 until then.",
-        (true, ProviderState.Unresponsive) => "llama-server is busy and does not answer its health checks. New local requests return 503 until it answers again. Requests in progress continue.",
-        (true, ProviderState.Missing) => "The model or server file is missing. Local requests return 502. Install the file, then restart the engine.",
-        (true, ProviderState.Failed) => "The local model failed. Local requests return 502 with the cause, and the engine log has the details. Restart the engine to try again.",
-        (true, ProviderState.Disabled) => "The local model is turned off in settings.",
-        (false, ProviderState.Ready) => $"The provider '{name}' is enabled. The engine does not test cloud providers.",
-        (false, ProviderState.Disabled) => $"The provider '{name}' has no API key, so it is turned off.",
-        (_, ProviderState.Stopping) => "The engine is stopping.",
-        (false, _) => $"The provider '{name}' cannot take requests now.",
-    };
+        var isLocal = name == LocalName;
+        var model = isLocal ? "The local model" : $"The model of the provider '{name}'";
+        var requests = isLocal ? "Local requests" : $"Requests to the provider '{name}'";
+        var newRequests = isLocal ? "New local requests" : $"New requests to the provider '{name}'";
+        return state switch
+        {
+            ProviderState.Ready => $"{model} is ready.",
+            ProviderState.Busy => $"{model} is ready, and all its slots are in use. New requests wait in the queue.",
+            ProviderState.Starting => $"{model} is loading. {requests} return 503 until it is ready.",
+            ProviderState.Restarting => $"llama-server stopped unexpectedly, and the engine is restarting it. {requests} return 503 until then.",
+            ProviderState.Unresponsive => $"llama-server is busy and does not answer its health checks. {newRequests} return 503 until it answers again. Requests in progress continue.",
+            ProviderState.Missing => $"The model or server file is missing. {requests} return 502. Install the file, then restart the engine.",
+            ProviderState.Failed => $"{model} failed. {requests} return 502 with the cause, and the engine log has the details. Restart the engine to try again.",
+            ProviderState.Disabled => $"{model} is turned off in settings.",
+            ProviderState.Stopping => "The engine is stopping.",
+        };
+    }
 }

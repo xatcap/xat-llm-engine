@@ -1,3 +1,4 @@
+using System.Text.Json.Nodes;
 using Microsoft.Extensions.Options;
 using XatLlmEngine.Application.Abstractions;
 using XatLlmEngine.Domain;
@@ -5,22 +6,24 @@ using XatLlmEngine.Infrastructure.Providers.OpenAiCompatible;
 
 namespace XatLlmEngine.Infrastructure.LlamaCpp;
 
-/// <summary>Serves chat requests from the local model through the supervised llama-server.</summary>
+/// <summary>Serves chat requests from one local model through its supervised llama-server.</summary>
 /// <param name="supervisor">Reports whether and where the server is running.</param>
 /// <param name="gate">Lets at most one request per slot reach the server.</param>
 /// <param name="client">The protocol client, because llama-server speaks the OpenAI protocol.</param>
 /// <param name="options">The local model settings.</param>
+/// <param name="role">The identity of the model, or <see langword="null"/> for the main model.</param>
 internal sealed class LocalChatProvider(
     LlamaServerSupervisor supervisor,
     LocalRequestGate gate,
     OpenAiClient client,
-    IOptions<LlamaCppOptions> options) : IChatProvider
+    IOptions<LlamaCppOptions> options,
+    LlamaModelRole? role = null) : IChatProvider
 {
-    /// <summary>The reserved provider name of the local model.</summary>
-    public const string ProviderName = "local";
+    /// <summary>The identity of the model.</summary>
+    private readonly LlamaModelRole role = role ?? LlamaModelRole.Main;
 
     /// <inheritdoc/>
-    public string Name => ProviderName;
+    public string Name => role.ProviderName;
 
     /// <inheritdoc/>
     public IReadOnlyList<string> Models { get; } = [options.Value.ModelName];
@@ -29,7 +32,13 @@ internal sealed class LocalChatProvider(
     public IReadOnlyList<string> RequestFields => options.Value.RequestFields;
 
     /// <inheritdoc/>
+    public IReadOnlyList<string> TokenLimitFields => OpenAiClient.TokenLimitFields;
+
+    /// <inheritdoc/>
     public int MaxTokensLimit => options.Value.MaxTokensLimit;
+
+    /// <inheritdoc/>
+    public bool ShouldForwardStreamUsage(JsonObject body) => client.ShouldForwardStreamUsage(body);
 
     /// <inheritdoc/>
     public ProviderStatus Status
@@ -68,7 +77,7 @@ internal sealed class LocalChatProvider(
         using var lease = entered.Value;
         if (Serving() is not { } endpoint)
         {
-            return Result<ChatCompletion>.Fail(LocalModelErrors.ForNewRequest(supervisor.Snapshot) ?? NotServing);
+            return Result<ChatCompletion>.Fail(LocalModelErrors.ForNewRequest(supervisor.Snapshot, role) ?? NotServing);
         }
 
         var result = await client.CompleteAsync(endpoint.BaseUrl, endpoint.ApiKey, WithDefaults(request), cancellationToken).ConfigureAwait(false);
@@ -96,7 +105,7 @@ internal sealed class LocalChatProvider(
             if (Serving() is not { } endpoint)
             {
                 lease.Dispose();
-                return Result<IAsyncEnumerable<ChatChunk>>.Fail(LocalModelErrors.ForNewRequest(supervisor.Snapshot) ?? NotServing);
+                return Result<IAsyncEnumerable<ChatChunk>>.Fail(LocalModelErrors.ForNewRequest(supervisor.Snapshot, role) ?? NotServing);
             }
 
             var stream = await client.StreamAsync(endpoint.BaseUrl, endpoint.ApiKey, WithDefaults(request), cancellationToken).ConfigureAwait(false);
@@ -130,7 +139,7 @@ internal sealed class LocalChatProvider(
     private EngineError? FindModelProblem(ChatRequest request) =>
         Models.Contains(request.Model, StringComparer.Ordinal)
             ? null
-            : new EngineError(ErrorKind.NotFound, $"The local model '{request.Model}' does not exist. Use '{options.Value.ModelName}'.");
+            : new EngineError(ErrorKind.NotFound, $"The model '{request.Model}' does not exist for the provider '{Name}'. Use '{options.Value.ModelName}'.");
 
     /// <summary>Applies the local default temperature when the caller sent none.</summary>
     /// <param name="request">The validated request.</param>

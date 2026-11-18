@@ -151,7 +151,7 @@ public class ApiTests
     /// <param name="retryAfter">Whether the test expects a Retry-After header.</param>
     /// <returns>A task for the test.</returns>
     [Theory]
-    [InlineData(ErrorKind.RateLimited, HttpStatusCode.TooManyRequests, true)]
+    [InlineData(ErrorKind.Overloaded, HttpStatusCode.ServiceUnavailable, true)]
     [InlineData(ErrorKind.Unavailable, HttpStatusCode.ServiceUnavailable, true)]
     [InlineData(ErrorKind.Upstream, HttpStatusCode.BadGateway, false)]
     public async Task Chat_ProviderFails_MapsStatus(ErrorKind kind, HttpStatusCode status, bool retryAfter)
@@ -165,7 +165,7 @@ public class ApiTests
         Assert.Equal(retryAfter, response.Headers.RetryAfter is not null);
     }
 
-    /// <summary>The caller gets the wait that the provider asked for, in whole seconds rounded up, and at least 1 second. Without one, the engine uses its own default.</summary>
+    /// <summary>The caller gets the wait that the error holds, in whole seconds rounded up, and at least 1 second. Without one, the engine uses its own default.</summary>
     /// <param name="providerSeconds">The provider's requested wait in seconds, or a negative value for no request.</param>
     /// <param name="expectedSeconds">The expected Retry-After value.</param>
     /// <returns>A task for the test.</returns>
@@ -174,15 +174,15 @@ public class ApiTests
     [InlineData(2.2, 3)]
     [InlineData(0.0, 1)]
     [InlineData(-1.0, 5)]
-    public async Task Chat_RateLimited_ForwardsProviderRetryAfter(double providerSeconds, int expectedSeconds)
+    public async Task Chat_Overloaded_ForwardsProviderRetryAfter(double providerSeconds, int expectedSeconds)
     {
         await using var engine = new EngineFactory();
         var requested = providerSeconds < 0 ? (TimeSpan?)null : TimeSpan.FromSeconds(providerSeconds);
-        engine.Provider.Failure = new EngineError(ErrorKind.RateLimited, "Problem.", requested);
+        engine.Provider.Failure = new EngineError(ErrorKind.Overloaded, "Problem.", requested);
 
         using var response = await PostAsync(engine, ValidBody);
 
-        Assert.Equal(HttpStatusCode.TooManyRequests, response.StatusCode);
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
         Assert.Equal(TimeSpan.FromSeconds(expectedSeconds), response.Headers.RetryAfter?.Delta);
     }
 
@@ -273,11 +273,11 @@ public class ApiTests
     public async Task Stream_FailsBeforeStart_ReturnsHttpError()
     {
         await using var engine = new EngineFactory();
-        engine.Provider.Failure = new EngineError(ErrorKind.RateLimited, "Slow down.");
+        engine.Provider.Failure = new EngineError(ErrorKind.Overloaded, "Slow down.");
 
         using var response = await PostAsync(engine, """{"model":"fake/model-a","stream":true,"messages":[{"role":"user","content":"Hi"}]}""");
 
-        Assert.Equal(HttpStatusCode.TooManyRequests, response.StatusCode);
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
     }
 
     /// <summary>A failure in the first event is still a normal HTTP error, because the engine has not written any data.</summary>
@@ -286,11 +286,11 @@ public class ApiTests
     public async Task Stream_FailsOnFirstEvent_ReturnsHttpError()
     {
         await using var engine = new EngineFactory();
-        engine.Provider.ThrowAfterChunks = new ChatStreamException(new EngineError(ErrorKind.RateLimited, "Slow down."));
+        engine.Provider.ThrowAfterChunks = new ChatStreamException(new EngineError(ErrorKind.Overloaded, "Slow down."));
 
         using var response = await PostAsync(engine, """{"model":"fake/model-a","stream":true,"messages":[{"role":"user","content":"Hi"}]}""");
 
-        Assert.Equal(HttpStatusCode.TooManyRequests, response.StatusCode);
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
     }
 
     /// <summary>A stream with no events at all is a provider failure.</summary>
@@ -444,7 +444,7 @@ public class ApiTests
         var providers = body.RootElement.GetProperty("providers").EnumerateArray()
             .ToDictionary(entry => entry.GetProperty("name").GetString()!, entry => entry.GetProperty("state").GetString());
         Assert.Equal("ready", providers["fake"]);
-        Assert.Equal("disabled", providers["openai"]);
+        Assert.Equal("disabled", providers["query-expansion"]);
         Assert.True(providers.ContainsKey("local"));
         Assert.False(string.IsNullOrEmpty(body.RootElement.GetProperty("version").GetString()));
     }
@@ -473,7 +473,7 @@ public class ApiTests
     [InlineData("?provider=fake", HttpStatusCode.OK)]
     [InlineData("?provider=FAKE", HttpStatusCode.OK)]
     [InlineData("?provider=local", HttpStatusCode.ServiceUnavailable)]
-    [InlineData("?provider=openai", HttpStatusCode.ServiceUnavailable)]
+    [InlineData("?provider=query-expansion", HttpStatusCode.ServiceUnavailable)]
     [InlineData("?provider=unknown", HttpStatusCode.ServiceUnavailable)]
     public async Task HealthReady_DependsOnProvider(string query, HttpStatusCode expected)
     {

@@ -23,7 +23,8 @@ xat-llm-engine uses the MIT License (see `LICENSE`). Its release packages also i
 | Swashbuckle.AspNetCore.SwaggerUI | Inside the engine program. The engine serves it only in the Development environment. | MIT | `licenses/nuget/Swashbuckle.AspNetCore.SwaggerUI/` |
 | swagger-ui 5.33.3 | Inside Swashbuckle.AspNetCore.SwaggerUI | Apache-2.0, with a NOTICE file | `licenses/nuget/Swashbuckle.AspNetCore.SwaggerUI/` |
 | Ministral 3 3B Instruct (GGUF Q4_K_M) by Mistral AI | A separate release file | Apache-2.0 | The release file `Ministral-LICENSE.txt` |
+| Qwen3 0.6B (GGUF Q4_K_M) by Alibaba Cloud, converted by Unsloth | `models/` in the package | Apache-2.0 | `licenses/Qwen3-LICENSE.txt` |
 
-The release includes the model without changes. Users must not use it in a way that infringes third-party rights, as stated on its model card.
+The release includes the models without changes. Users must not use it in a way that infringes third-party rights, as stated on its model card.
 
 `build/third-party.json` lists the same components for the release script. `python3 build/release.py check-notices` fails when a package that the engine ships is missing from that list.

@@ -2,11 +2,12 @@ using System.Collections.Frozen;
 using System.ComponentModel.DataAnnotations;
 using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
+using XatLlmEngine.Infrastructure.Providers.OpenAiCompatible;
 
 namespace XatLlmEngine.Infrastructure.LlamaCpp;
 
-/// <summary>Settings for the local model and the llama-server program that runs it.</summary>
-public sealed class LlamaCppOptions : IValidatableObject
+/// <summary>Settings for a local model and the llama-server program that runs it. The main model uses this class. The query-expansion model uses <see cref="QueryExpansionOptions"/>.</summary>
+public class LlamaCppOptions : IValidatableObject
 {
     /// <summary>
     /// The llama-server flags that <see cref="ExtraArguments"/> can contain. Every other flag stops the engine at startup.
@@ -174,9 +175,9 @@ public sealed class LlamaCppOptions : IValidatableObject
     /// <inheritdoc/>
     public IEnumerable<ValidationResult> Validate(ValidationContext validationContext)
     {
-        if (MaxTokensLimit > 0 && !RequestFields.Contains("max_tokens", StringComparer.Ordinal) && !RequestFields.Contains("max_completion_tokens", StringComparer.Ordinal))
+        if (MaxTokensLimit > 0 && !OpenAiClient.TokenLimitFields.Any(field => RequestFields.Contains(field, StringComparer.Ordinal)))
         {
-            yield return new ValidationResult("MaxTokensLimit needs max_tokens or max_completion_tokens in RequestFields.", [nameof(MaxTokensLimit)]);
+            yield return new ValidationResult($"MaxTokensLimit needs {string.Join(" or ", OpenAiClient.TokenLimitFields)} in RequestFields.", [nameof(MaxTokensLimit)]);
         }
 
         foreach (var entry in ReadExtraArguments())

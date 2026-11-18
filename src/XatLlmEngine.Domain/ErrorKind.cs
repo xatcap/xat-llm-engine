@@ -9,9 +9,6 @@ public enum ErrorKind
     /// <summary>The requested provider or model does not exist.</summary>
     NotFound,
 
-    /// <summary>A provider refused the request because the caller sent too many requests.</summary>
-    RateLimited,
-
     /// <summary>The provider cannot serve requests right now, for example while a local model loads.</summary>
     Unavailable,
 

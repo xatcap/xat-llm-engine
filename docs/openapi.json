@@ -83,8 +83,84 @@
               }
             }
           },
-          "429": {
-            "description": "Too Many Requests",
+          "502": {
+            "description": "Bad Gateway",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/query-expansion": {
+      "post": {
+        "tags": [
+          "QueryExpansionEndpoint"
+        ],
+        "summary": "Writes other search queries for one search query.",
+        "description": "Writes other search queries for one search query, with the small query-expansion model. The engine owns the prompt, so the request holds only the query.",
+        "requestBody": {
+          "description": "The search query, and how many other queries to write. 'count' is optional: the default is 3, and the largest value is 10.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/QueryExpansionRequest"
+              },
+              "example": {
+                "query": "how to reset a router",
+                "count": 3
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QueryExpansionResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Payload Too Large",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Unsupported Media Type",
             "content": {
               "application/json": {
                 "schema": {
@@ -522,12 +598,58 @@
           }
         },
         "description": "The health of one provider."
+      },
+      "QueryExpansionRequest": {
+        "required": [
+          "query",
+          "count"
+        ],
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "The search query to expand."
+          },
+          "count": {
+            "type": [
+              "null",
+              "integer"
+            ],
+            "description": "How many other queries to write. The default is 3. The largest value is 10.",
+            "format": "int32"
+          }
+        },
+        "description": "The request body of `POST /v1/query-expansion`. The route reads the JSON itself, so that it can reject a wrong type or an unknown field with a clear message. This type describes the body in the API document."
+      },
+      "QueryExpansionResponse": {
+        "required": [
+          "queries",
+          "model"
+        ],
+        "type": "object",
+        "properties": {
+          "queries": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The new queries. The list never holds the original query or a repeated query."
+          },
+          "model": {
+            "type": "string",
+            "description": "The model that wrote the queries, written as `provider/model`."
+          }
+        },
+        "description": "The answer of `POST /v1/query-expansion`."
       }
     }
   },
   "tags": [
     {
       "name": "ChatCompletionsEndpoint"
+    },
+    {
+      "name": "QueryExpansionEndpoint"
     },
     {
       "name": "ModelsEndpoint"

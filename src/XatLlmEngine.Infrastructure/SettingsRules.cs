@@ -51,7 +51,7 @@ internal static class SettingsRules
     }
 
     /// <summary>Stops the engine when the list has problems.</summary>
-    /// <param name="subject">The settings that the problems apply to, for example "provider 'openai'".</param>
+    /// <param name="subject">The settings that the problems apply to, for example "'LocalModel'".</param>
     /// <param name="problems">The problems.</param>
     /// <exception cref="InvalidOperationException">The list has at least one problem.</exception>
     public static void ThrowIfAny(string subject, IReadOnlyCollection<string> problems)

@@ -7,7 +7,7 @@ namespace XatLlmEngine.Host.Security;
 internal static class ListenAddressPolicy
 {
     /// <summary>
-    /// Refuses to start on a non-loopback address, because the API has no authentication. Without this rule, anyone on the network can spend the credit of the cloud accounts.
+    /// Refuses to start on a non-loopback address, because the API has no authentication. Without this rule, anyone on the network can use the models of this machine.
     /// Also refuses port 0 on <c>localhost</c>, which the server cannot use.
     /// </summary>
     /// <param name="configuration">The application configuration.</param>

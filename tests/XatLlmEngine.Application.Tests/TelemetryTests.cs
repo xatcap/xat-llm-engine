@@ -35,9 +35,9 @@ public sealed class TelemetryTests : IDisposable
     {
         using var requests = Collect<long>("xat_engine.chat.requests");
         using var tokens = Collect<long>("xat_engine.tokens");
-        var provider = new FakeChatProvider("cloud") { Models = ["model-a"], Usage = new TokenUsage(7, 3) };
+        var provider = new FakeChatProvider("local") { Models = ["model-a"], Usage = new TokenUsage(7, 3) };
 
-        await new CompleteChatHandler(new ProviderRegistry([provider]), telemetry).HandleAsync(Command("cloud/model-a"), TestContext.Current.CancellationToken);
+        await new CompleteChatHandler(new ProviderRegistry([provider]), telemetry).HandleAsync(Command("local/model-a"), TestContext.Current.CancellationToken);
 
         var request = Assert.Single(requests.GetMeasurementSnapshot());
         Assert.Equal("ok", request.Tags["outcome"]);
@@ -53,7 +53,7 @@ public sealed class TelemetryTests : IDisposable
     {
         using var requests = Collect<long>("xat_engine.chat.requests");
 
-        await new CompleteChatHandler(new ProviderRegistry([new FakeChatProvider("cloud")]), telemetry).HandleAsync(Command("cloud/any-name"), TestContext.Current.CancellationToken);
+        await new CompleteChatHandler(new ProviderRegistry([new FakeChatProvider("local")]), telemetry).HandleAsync(Command("local/any-name"), TestContext.Current.CancellationToken);
 
         Assert.Equal("other", Assert.Single(requests.GetMeasurementSnapshot()).Tags["model"]);
     }
@@ -64,11 +64,11 @@ public sealed class TelemetryTests : IDisposable
     public async Task Complete_Failure_CountsOutcome()
     {
         using var requests = Collect<long>("xat_engine.chat.requests");
-        var provider = new FakeChatProvider("cloud") { Failure = new EngineError(ErrorKind.RateLimited, "Slow down.") };
+        var provider = new FakeChatProvider("local") { Failure = new EngineError(ErrorKind.Overloaded, "Slow down.") };
 
-        await new CompleteChatHandler(new ProviderRegistry([provider]), telemetry).HandleAsync(Command("cloud/m"), TestContext.Current.CancellationToken);
+        await new CompleteChatHandler(new ProviderRegistry([provider]), telemetry).HandleAsync(Command("local/m"), TestContext.Current.CancellationToken);
 
-        Assert.Equal("rate_limited", Assert.Single(requests.GetMeasurementSnapshot()).Tags["outcome"]);
+        Assert.Equal("overloaded", Assert.Single(requests.GetMeasurementSnapshot()).Tags["outcome"]);
     }
 
     /// <summary>A stream counts when it ends, with the time to the first piece and the tokens.</summary>
@@ -78,8 +78,8 @@ public sealed class TelemetryTests : IDisposable
     {
         using var requests = Collect<long>("xat_engine.chat.requests");
         using var firstChunk = Collect<double>("xat_engine.chat.time_to_first_chunk");
-        var provider = new FakeChatProvider("cloud") { Chunks = [new ChatChunk("Hi", FinishReason.Stop, new TokenUsage(2, 1))] };
-        var result = await new StreamChatHandler(new ProviderRegistry([provider]), telemetry).HandleAsync(Command("cloud/m"), TestContext.Current.CancellationToken);
+        var provider = new FakeChatProvider("local") { Chunks = [new ChatChunk("Hi", FinishReason.Stop, new TokenUsage(2, 1))] };
+        var result = await new StreamChatHandler(new ProviderRegistry([provider]), telemetry).HandleAsync(Command("local/m"), TestContext.Current.CancellationToken);
 
         await using (var answer = result.Value!)
         {
@@ -101,7 +101,7 @@ public sealed class TelemetryTests : IDisposable
     public async Task Stream_NotRead_CountsAsCanceled()
     {
         using var requests = Collect<long>("xat_engine.chat.requests");
-        var result = await new StreamChatHandler(new ProviderRegistry([new FakeChatProvider("cloud")]), telemetry).HandleAsync(Command("cloud/m"), TestContext.Current.CancellationToken);
+        var result = await new StreamChatHandler(new ProviderRegistry([new FakeChatProvider("local")]), telemetry).HandleAsync(Command("local/m"), TestContext.Current.CancellationToken);
 
         await result.Value!.DisposeAsync();
 

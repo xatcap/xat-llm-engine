@@ -24,7 +24,7 @@ internal static class ChatRouter
         {
             return Result<RoutedChat>.Fail(new EngineError(
                 ErrorKind.NotFound,
-                $"The provider '{model.Value.Provider}' is not available. Check its name, and check that the configuration has its API key."));
+                $"The provider '{model.Value.Provider}' is not available. Check its name, and check that the provider is turned on in the settings."));
         }
 
         if (FindUnsupportedField(provider, command.Body) is { } unsupported)

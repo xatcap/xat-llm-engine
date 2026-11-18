@@ -75,7 +75,6 @@ public sealed class EngineTelemetry : IDisposable
     {
         ErrorKind.InvalidRequest => "invalid_request",
         ErrorKind.NotFound => "not_found",
-        ErrorKind.RateLimited => "rate_limited",
         ErrorKind.Unavailable => "unavailable",
         ErrorKind.Upstream => "upstream",
         ErrorKind.Overloaded => "overloaded",

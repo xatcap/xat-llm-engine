@@ -18,6 +18,9 @@ internal sealed class LocalRequestGate
     /// <summary>The clock, for the time of the last progress.</summary>
     private readonly TimeProvider timeProvider;
 
+    /// <summary>The identity of the model, for error messages.</summary>
+    private readonly LlamaModelRole role;
+
     /// <summary>The number of requests that have a slot.</summary>
     private int active;
 
@@ -31,13 +34,15 @@ internal sealed class LocalRequestGate
     /// <param name="capacity">The number of slots.</param>
     /// <param name="queueLimit">The number of requests that can wait.</param>
     /// <param name="timeProvider">The clock.</param>
-    public LocalRequestGate(int capacity, int queueLimit, TimeProvider timeProvider)
+    /// <param name="role">The identity of the model, or <see langword="null"/> for the main model. It names the model in error messages.</param>
+    public LocalRequestGate(int capacity, int queueLimit, TimeProvider timeProvider, LlamaModelRole? role = null)
     {
+        this.role = role ?? LlamaModelRole.Main;
         Capacity = capacity;
         QueueLimit = queueLimit;
         this.timeProvider = timeProvider;
         lastProgress = timeProvider.GetTimestamp();
-        closed = LocalModelErrors.ForNewRequest(new LlamaServerSnapshot(LlamaServerState.Starting));
+        closed = LocalModelErrors.ForNewRequest(new LlamaServerSnapshot(LlamaServerState.Starting), this.role);
     }
 
     /// <summary>Gets the number of slots.</summary>
@@ -99,7 +104,7 @@ internal sealed class LocalRequestGate
 
             if (waiters.Count >= QueueLimit)
             {
-                return Result<Lease>.Fail(LocalModelErrors.QueueFull);
+                return Result<Lease>.Fail(LocalModelErrors.QueueFull(role));
             }
 
             waiter = new TaskCompletionSource<EngineError?>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -115,7 +120,7 @@ internal sealed class LocalRequestGate
     /// <param name="snapshot">The new state.</param>
     public void Update(LlamaServerSnapshot snapshot)
     {
-        var error = LocalModelErrors.ForNewRequest(snapshot);
+        var error = LocalModelErrors.ForNewRequest(snapshot, role);
         List<TaskCompletionSource<EngineError?>> failed = [];
         lock (sync)
         {

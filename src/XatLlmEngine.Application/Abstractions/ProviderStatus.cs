@@ -27,7 +27,7 @@ public enum ProviderState
     /// <summary>The engine is stopping.</summary>
     Stopping,
 
-    /// <summary>The provider is configured, but turned off, for example because it has no API key.</summary>
+    /// <summary>The provider is configured, but turned off, because the settings turn it off.</summary>
     Disabled,
 }
 

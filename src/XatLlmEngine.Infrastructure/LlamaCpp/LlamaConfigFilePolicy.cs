@@ -4,7 +4,7 @@ namespace XatLlmEngine.Infrastructure.LlamaCpp;
 /// <remarks>
 /// llama-server always reads these files, and no flag or variable turns this off. A file can turn on options that
 /// <see cref="LlamaCppOptions.ExtraArguments"/> does not allow, such as a log file. The engine cannot replace all these
-/// values safely from the command line, so the local model fails when a file exists. Cloud providers continue to work.
+/// values safely from the command line, so the local model fails when a file exists. The other local model continues to work.
 /// </remarks>
 internal static class LlamaConfigFilePolicy
 {

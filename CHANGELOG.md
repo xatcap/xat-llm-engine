@@ -6,6 +6,23 @@ The release workflow uses the section of each version as its release notes. Writ
 
 ## [Unreleased]
 
+### Added
+
+- The route `POST /v1/query-expansion`. It turns one search query into several. Send `{"query": "...", "count": 3}`. The engine writes the prompt, so your app sends only the query. `count` is a whole number from 1 to 10. The default is 3. The answer is `{"queries": [...], "model": "query-expansion/qwen3-0.6b"}`.
+- A second local model for query expansion. The default is Qwen3 0.6B Q4_K_M. It runs in its own `llama-server` process, with its own settings in the `QueryExpansionModel` section of `appsettings.json`. Both models start with the engine, so both stay in memory. Set `QueryExpansionModel:Enabled` to `false` to turn it off. Then the route returns 503.
+- The release package includes the query-expansion model in its `models` folder, with its license in `licenses/Qwen3-LICENSE.txt`.
+- The metrics of `llama-server` have a `model` tag. Its value is `local` or `query-expansion`.
+- `/health` and `/v1/models` list the model `query-expansion`.
+
+### Changed
+
+- The engine keeps one PID file for each model: `llama-server.pid` and `llama-server-query-expansion.pid`.
+
+### Removed
+
+- **Breaking:** All cloud providers. The engine now serves only local models. The `Providers` section of `appsettings.json`, the `Providers__<name>__ApiKey` variables and the provider types are removed. A request for `openai/<model>` or any other cloud provider gets 404. Remove the `Providers` section from your configuration.
+- **Breaking:** The error type `rate_limit_error` and the status 429. The engine no longer rate limits, because only the local queue can be full. A full queue still gives 503 with `Retry-After`. The `rate_limited` value of the `outcome` tag on `xat_engine.chat.requests` is also removed.
+
 ## [1.0.3] - 2026-11-10
 
 ### Changed

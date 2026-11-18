@@ -17,10 +17,10 @@ public class CostControlTests
     [InlineData("max_completion_tokens")]
     public async Task Limit_AskedAboveLimit_FailsBeforeProvider(string field)
     {
-        var provider = new FakeChatProvider("cloud") { RequestFields = ["messages", field], MaxTokensLimit = 100 };
+        var provider = new FakeChatProvider("local") { RequestFields = ["messages", field], MaxTokensLimit = 100 };
         var body = new JsonObject { ["messages"] = new JsonArray(), [field] = 101 };
 
-        var result = await new CompleteChatHandler(new ProviderRegistry([provider])).HandleAsync(new("cloud/m", body), TestContext.Current.CancellationToken);
+        var result = await new CompleteChatHandler(new ProviderRegistry([provider])).HandleAsync(new("local/m", body), TestContext.Current.CancellationToken);
 
         Assert.Equal(ErrorKind.InvalidRequest, result.Error?.Kind);
         Assert.Contains($"'{field}'", result.Error?.Message, StringComparison.Ordinal);
@@ -38,10 +38,10 @@ public class CostControlTests
     [InlineData("null")]
     public async Task Limit_InvalidValue_Fails(string value)
     {
-        var provider = new FakeChatProvider("cloud") { RequestFields = ["messages", "max_tokens"], MaxTokensLimit = 100 };
+        var provider = new FakeChatProvider("local") { RequestFields = ["messages", "max_tokens"], MaxTokensLimit = 100 };
         var body = new JsonObject { ["messages"] = new JsonArray(), ["max_tokens"] = JsonNode.Parse(value) };
 
-        var result = await new CompleteChatHandler(new ProviderRegistry([provider])).HandleAsync(new("cloud/m", body), TestContext.Current.CancellationToken);
+        var result = await new CompleteChatHandler(new ProviderRegistry([provider])).HandleAsync(new("local/m", body), TestContext.Current.CancellationToken);
 
         Assert.Equal(ErrorKind.InvalidRequest, result.Error?.Kind);
         Assert.Null(provider.LastRequest);
@@ -57,14 +57,14 @@ public class CostControlTests
     [InlineData(100, 100)]
     public async Task Limit_WithinLimit_ProviderGetsValue(int? sent, int expected)
     {
-        var provider = new FakeChatProvider("cloud") { RequestFields = ["messages", "max_completion_tokens"], MaxTokensLimit = 100 };
+        var provider = new FakeChatProvider("local") { RequestFields = ["messages", "max_completion_tokens"], MaxTokensLimit = 100 };
         var body = new JsonObject { ["messages"] = new JsonArray() };
         if (sent is not null)
         {
             body["max_completion_tokens"] = sent;
         }
 
-        await new CompleteChatHandler(new ProviderRegistry([provider])).HandleAsync(new("cloud/m", body), TestContext.Current.CancellationToken);
+        await new CompleteChatHandler(new ProviderRegistry([provider])).HandleAsync(new("local/m", body), TestContext.Current.CancellationToken);
 
         Assert.Equal(expected, provider.LastRequest!.Body["max_completion_tokens"]!.GetValue<int>());
         Assert.False(body.ContainsKey("max_completion_tokens") && sent is null);
@@ -75,34 +75,28 @@ public class CostControlTests
     [Fact]
     public async Task Limit_None_AddsNothing()
     {
-        var provider = new FakeChatProvider("cloud") { RequestFields = ["messages", "max_tokens"] };
+        var provider = new FakeChatProvider("local") { RequestFields = ["messages", "max_tokens"] };
 
-        await new CompleteChatHandler(new ProviderRegistry([provider])).HandleAsync(new("cloud/m", new JsonObject { ["messages"] = new JsonArray() }), TestContext.Current.CancellationToken);
+        await new CompleteChatHandler(new ProviderRegistry([provider])).HandleAsync(new("local/m", new JsonObject { ["messages"] = new JsonArray() }), TestContext.Current.CancellationToken);
 
         Assert.False(provider.LastRequest!.Body.ContainsKey("max_tokens"));
     }
 
-    /// <summary>The caller gets the token counts of an OpenAI-style stream only when it asked for them. Templates without stream_options always forward counts when present.</summary>
-    /// <param name="fields">The template, separated by ','.</param>
-    /// <param name="askUsage">Whether the caller sets stream_options.include_usage.</param>
-    /// <param name="expected">Whether the caller must get the counts.</param>
+    /// <summary>The stream handler forwards token counts only when the provider allows it for the request.</summary>
+    /// <param name="forwardUsage">Whether the provider tells the stream to forward token counts.</param>
     /// <returns>A task for the test.</returns>
     [Theory]
-    [InlineData("messages,stream_options", false, false)]
-    [InlineData("messages,stream_options", true, true)]
-    [InlineData("messages", false, true)]
-    public async Task Stream_ForwardUsage_FollowsCaller(string fields, bool askUsage, bool expected)
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Stream_ForwardUsage_FollowsProvider(bool forwardUsage)
     {
-        var provider = new FakeChatProvider("cloud") { RequestFields = fields.Split(','), Chunks = [new ChatChunk("Hi", FinishReason.Stop, new TokenUsage(1, 1))] };
+        var provider = new FakeChatProvider("local") { ForwardStreamUsage = forwardUsage, Chunks = [new ChatChunk("Hi", FinishReason.Stop, new TokenUsage(1, 1))] };
         var body = new JsonObject { ["messages"] = new JsonArray() };
-        if (askUsage)
-        {
-            body["stream_options"] = new JsonObject { ["include_usage"] = true };
-        }
 
-        var result = await new StreamChatHandler(new ProviderRegistry([provider])).HandleAsync(new("cloud/m", body), TestContext.Current.CancellationToken);
+        var result = await new StreamChatHandler(new ProviderRegistry([provider])).HandleAsync(new("local/m", body), TestContext.Current.CancellationToken);
         await using var answer = result.Value!;
 
-        Assert.Equal(expected, answer.ForwardUsage);
+        Assert.Equal(forwardUsage, answer.ForwardUsage);
+        Assert.Same(body, provider.LastStreamUsageBody);
     }
 }

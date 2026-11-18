@@ -5,16 +5,20 @@ using XatLlmEngine.Domain;
 namespace XatLlmEngine.Host.Tests;
 
 /// <summary>A provider that gives the answers that each test chooses.</summary>
-internal sealed class FakeProvider : IChatProvider
+/// <param name="name">The provider's name.</param>
+internal sealed class FakeProvider(string name = "fake") : IChatProvider
 {
     /// <inheritdoc/>
-    public string Name => "fake";
+    public string Name => name;
 
     /// <inheritdoc/>
     public IReadOnlyList<string> Models { get; } = ["model-a"];
 
     /// <inheritdoc/>
     public IReadOnlyList<string> RequestFields { get; set; } = ["messages", "temperature", "stream_options"];
+
+    /// <summary>Gets or sets the text of a complete answer.</summary>
+    public string Answer { get; set; } = "Hello!";
 
     /// <summary>Gets or sets the chunks to stream.</summary>
     public IReadOnlyList<ChatChunk> Chunks { get; set; } = [];
@@ -47,7 +51,7 @@ internal sealed class FakeProvider : IChatProvider
 
         LastRequest = request;
         return Task.FromResult(Failure is null
-            ? Result<ChatCompletion>.Ok(new ChatCompletion("Hello!", FinishReason.Stop, new TokenUsage(3, 2)))
+            ? Result<ChatCompletion>.Ok(new ChatCompletion(Answer, FinishReason.Stop, new TokenUsage(3, 2)))
             : Result<ChatCompletion>.Fail(Failure));
     }
 

@@ -1,4 +1,3 @@
-using System.Text.Json.Nodes;
 using XatLlmEngine.Application.Abstractions;
 using XatLlmEngine.Application.Diagnostics;
 using XatLlmEngine.Application.Features.Providers;
@@ -13,9 +12,6 @@ public sealed class StreamChatHandler(
     ProviderRegistry providers,
     EngineTelemetry? telemetry = null)
 {
-    /// <summary>The field of the OpenAI protocol that asks for token counts in a stream.</summary>
-    private const string StreamOptionsField = "stream_options";
-
     /// <summary>Validates the command, starts the stream and reads its first piece.</summary>
     /// <remarks>
     /// A failure before the first piece must still become a normal HTTP error. Thus this method reads the first piece before it
@@ -34,12 +30,7 @@ public sealed class StreamChatHandler(
 
         var chat = routed.Value;
         var measurement = (telemetry ?? EngineTelemetry.Unregistered).Start(chat.Provider, chat.Request.Model, stream: true);
-
-        // The OpenAI protocol sends token counts only when the caller asks for them. The adapter asks for them always, for the
-        // metrics and logs, so the stream gives them to the caller only when the caller asked. A provider with no
-        // 'stream_options' in its template sends the counts by itself, and the caller then gets them.
-        var templateHasStreamOptions = chat.Provider.RequestFields.Contains(StreamOptionsField, StringComparer.Ordinal);
-        var forwardUsage = !templateHasStreamOptions || CallerAskedForUsage(command.Body);
+        var forwardUsage = chat.Provider.ShouldForwardStreamUsage(command.Body);
         IAsyncEnumerator<ChatChunk>? source = null;
         var keep = false;
         try
@@ -86,13 +77,4 @@ public sealed class StreamChatHandler(
             }
         }
     }
-
-    /// <summary>Tells whether the caller set <c>stream_options.include_usage</c>.</summary>
-    /// <param name="body">The caller's body.</param>
-    /// <returns><see langword="true"/> when the caller asked for token counts.</returns>
-    private static bool CallerAskedForUsage(JsonObject body) =>
-        body[StreamOptionsField] is JsonObject streamOptions
-        && streamOptions["include_usage"] is JsonValue value
-        && value.TryGetValue<bool>(out var includeUsage)
-        && includeUsage;
 }

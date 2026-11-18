@@ -9,9 +9,6 @@ namespace XatLlmEngine.Application.Features.CompleteChat;
 /// <summary>Applies a provider's limit on output tokens. See ADR 0011.</summary>
 internal static class TokenLimitPolicy
 {
-    /// <summary>The request fields that set the output token limit, in order of preference. Each protocol uses one of them.</summary>
-    internal static readonly string[] LimitFields = ["max_tokens", "max_completion_tokens"];
-
     /// <summary>Refuses a request that asks for more tokens than the limit, and adds the limit to a request that has none.</summary>
     /// <param name="provider">The selected provider.</param>
     /// <param name="body">The request's own copy of the body. This method can change it.</param>
@@ -19,7 +16,7 @@ internal static class TokenLimitPolicy
     public static EngineError? Apply(IChatProvider provider, JsonObject body)
     {
         var limit = provider.MaxTokensLimit;
-        var fields = LimitFields.Where(field => provider.RequestFields.Contains(field, StringComparer.Ordinal)).ToList();
+        var fields = provider.TokenLimitFields.Where(field => provider.RequestFields.Contains(field, StringComparer.Ordinal)).ToList();
         if (limit <= 0 || fields.Count == 0)
         {
             return null;

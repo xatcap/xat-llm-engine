@@ -96,12 +96,14 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: model-cache
-          key: model-${{ hashFiles('build/model.lock.json') }}
-      - name: Download the pinned model
-        run: python build/release.py fetch-model --output model-cache
+          key: model-${{ hashFiles('build/model.lock.json', 'build/query-expansion-model.lock.json') }}
+      - name: Download the pinned models
+        run: |
+          python build/release.py fetch-model --output model-cache
+          python build/release.py fetch-model --lock query-expansion-model.lock.json --output model-cache
       - name: Build the package
         shell: bash
-        run: python build/release.py package --rid "${{ matrix.rid }}" --version "$PACKAGE_VERSION" --output artifacts
+        run: python build/release.py package --rid "${{ matrix.rid }}" --version "$PACKAGE_VERSION" --output artifacts --model-cache model-cache
       - name: Run the package with the real model
         shell: bash
         run: >
@@ -144,7 +146,7 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: model-cache
-          key: model-${{ hashFiles('build/model.lock.json') }}
+          key: model-${{ hashFiles('build/model.lock.json', 'build/query-expansion-model.lock.json') }}
       - name: Add the model and its license
         run: |
           python build/release.py fetch-model --output model-cache

@@ -11,34 +11,19 @@ using XatLlmEngine.Domain;
 
 namespace XatLlmEngine.Infrastructure.Providers;
 
-/// <summary>Tells whether a provider runs on this machine under the engine's control, or is a cloud service.</summary>
-internal enum ProviderKind
-{
-    /// <summary>A cloud service, with a key from the settings.</summary>
-    Cloud,
-
-    /// <summary>The supervised llama-server, with a random key for each run.</summary>
-    Local,
-}
-
-/// <summary>The settings of one provider's transport.</summary>
+/// <summary>The settings of the transport of one llama-server.</summary>
 /// <param name="ProviderName">The provider's name, for messages and logs.</param>
-/// <param name="Kind">The kind of provider.</param>
 /// <param name="HttpClientName">The named HTTP client.</param>
-/// <param name="RequestTimeout">How long to wait for the response headers, or <see langword="null"/> for no limit.</param>
-/// <param name="ReadIdleTimeout">How long one read of the response body can wait for data, or <see langword="null"/> for no limit.</param>
-internal sealed record TransportSettings(string ProviderName, ProviderKind Kind, string HttpClientName, TimeSpan? RequestTimeout, TimeSpan? ReadIdleTimeout);
+internal sealed record TransportSettings(string ProviderName, string HttpClientName);
 
-/// <summary>Sends requests to a provider and translates every transport failure into an engine error.</summary>
-/// <remarks>The engine never retries a request. See ADR 0006.</remarks>
+/// <summary>Sends requests to llama-server and translates every transport failure into an engine error.</summary>
+/// <remarks>The engine never retries a request.</remarks>
 /// <param name="settings">The transport settings.</param>
 /// <param name="httpClientFactory">Creates HTTP clients, so that the connection pool works correctly.</param>
-/// <param name="timeProvider">The clock, for the time limits and for a Retry-After header that holds a date.</param>
 /// <param name="logger">The log for failures.</param>
 internal sealed partial class ProviderTransport(
     TransportSettings settings,
     IHttpClientFactory httpClientFactory,
-    TimeProvider timeProvider,
     ILogger logger)
 {
     /// <summary>The largest successful response body that the engine reads. A chat answer is much smaller.</summary>
@@ -51,7 +36,7 @@ internal sealed partial class ProviderTransport(
     /// <typeparam name="TBody">The wire type of the answer.</typeparam>
     /// <typeparam name="TResult">The engine type of the answer.</typeparam>
     /// <param name="address">The full address of the operation.</param>
-    /// <param name="authenticate">Adds the provider's authentication headers.</param>
+    /// <param name="authenticate">Adds the authentication headers.</param>
     /// <param name="body">The request body.</param>
     /// <param name="bodyType">The source-generated JSON contract of the answer.</param>
     /// <param name="map">Converts the wire answer. It returns a failure when the answer is not complete.</param>
@@ -74,7 +59,7 @@ internal sealed partial class ProviderTransport(
                 return Result<TResult>.Fail(await FailAsync(response, cancellationToken).ConfigureAwait(false));
             }
 
-            var content = await OpenBodyAsync(response, cancellationToken).ConfigureAwait(false);
+            var content = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
             await using (content.ConfigureAwait(false))
             {
                 var limited = new SizeLimitedStream(content, MaxResponseBytes);
@@ -92,7 +77,7 @@ internal sealed partial class ProviderTransport(
 
     /// <summary>Sends a request for a stream, and returns as soon as the response headers arrive.</summary>
     /// <param name="address">The full address of the operation.</param>
-    /// <param name="authenticate">Adds the provider's authentication headers.</param>
+    /// <param name="authenticate">Adds the authentication headers.</param>
     /// <param name="body">The request body.</param>
     /// <param name="read">Converts the server-sent events into chunks.</param>
     /// <param name="cancellationToken">Cancels the request and the stream.</param>
@@ -140,7 +125,6 @@ internal sealed partial class ProviderTransport(
     /// <param name="body">The request body.</param>
     /// <param name="cancellationToken">Cancels the request.</param>
     /// <returns>The response, which the caller must dispose.</returns>
-    /// <exception cref="ProviderTimeoutException">The headers did not arrive in time.</exception>
     private async Task<HttpResponseMessage> SendAsync(Uri address, Action<HttpRequestHeaders> authenticate, JsonObject body, CancellationToken cancellationToken)
     {
         using var message = new HttpRequestMessage(HttpMethod.Post, address)
@@ -150,32 +134,7 @@ internal sealed partial class ProviderTransport(
         authenticate(message.Headers);
 
         using var client = httpClientFactory.CreateClient(settings.HttpClientName);
-        if (settings.RequestTimeout is not { } timeout)
-        {
-            return await client.SendAsync(message, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
-        }
-
-        // The limit covers only the wait for the headers. The idle limit covers the body, so a long stream can continue.
-        using var timer = new CancellationTokenSource(timeout, timeProvider);
-        using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timer.Token);
-        try
-        {
-            return await client.SendAsync(message, HttpCompletionOption.ResponseHeadersRead, linked.Token).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException exception) when (timer.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
-        {
-            throw new ProviderTimeoutException(timeout, exception);
-        }
-    }
-
-    /// <summary>Opens the response body, with the idle limit when the settings have one.</summary>
-    /// <param name="response">The response.</param>
-    /// <param name="cancellationToken">Cancels the read.</param>
-    /// <returns>The body stream, which the caller must dispose.</returns>
-    private async Task<Stream> OpenBodyAsync(HttpResponseMessage response, CancellationToken cancellationToken)
-    {
-        var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
-        return settings.ReadIdleTimeout is { } idle ? new IdleTimeoutStream(stream, idle, timeProvider) : stream;
+        return await client.SendAsync(message, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>Builds the error for a failed response. A body that the engine cannot read gives the general message for the status.</summary>
@@ -194,16 +153,16 @@ internal sealed partial class ProviderTransport(
             // The status alone is enough for the error.
         }
 
-        return HttpFailure.FromResponse(settings.ProviderName, settings.Kind, response, body, timeProvider.GetUtcNow(), logger);
+        return HttpFailure.FromResponse(settings.ProviderName, response, body, logger);
     }
 
     /// <summary>Reads at most <see cref="MaxErrorBodyBytes"/> of an error body.</summary>
     /// <param name="response">The failed response.</param>
     /// <param name="cancellationToken">Cancels the read.</param>
     /// <returns>The body text, or <see langword="null"/> when it is larger than the limit.</returns>
-    private async Task<string?> ReadErrorBodyAsync(HttpResponseMessage response, CancellationToken cancellationToken)
+    private static async Task<string?> ReadErrorBodyAsync(HttpResponseMessage response, CancellationToken cancellationToken)
     {
-        var stream = await OpenBodyAsync(response, cancellationToken).ConfigureAwait(false);
+        var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
         await using (stream.ConfigureAwait(false))
         {
             var buffer = new byte[MaxErrorBodyBytes + 1];
@@ -227,7 +186,7 @@ internal sealed partial class ProviderTransport(
     {
         using (response)
         {
-            var stream = await OpenBodyAsync(response, cancellationToken).ConfigureAwait(false);
+            var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
             await using (stream.ConfigureAwait(false))
             {
                 var events = SseParser
@@ -272,10 +231,6 @@ internal sealed partial class ProviderTransport(
         EngineError? translated = exception switch
         {
             _ when cancellationToken.IsCancellationRequested => null,
-            ProviderTimeoutException timeout =>
-                new(ErrorKind.Unavailable, $"The provider '{name}' did not start its answer within {timeout.Timeout.TotalSeconds:0} seconds."),
-            ProviderStalledException stalled =>
-                new(ErrorKind.Unavailable, $"The provider '{name}' sent no data for {stalled.Timeout.TotalSeconds:0} seconds."),
             HttpRequestException or IOException =>
                 new(ErrorKind.Unavailable, $"The connection to the provider '{name}' failed."),
             JsonException or InvalidDataException => HttpFailure.Malformed(name),
@@ -296,7 +251,7 @@ internal sealed partial class ProviderTransport(
         return true;
     }
 
-    /// <summary>Logs a connection failure or a time limit. The exception does not hold request headers or bodies.</summary>
+    /// <summary>Logs a connection failure. The exception does not hold request headers or bodies.</summary>
     /// <param name="logger">The log.</param>
     /// <param name="exception">The cause.</param>
     /// <param name="providerName">The provider's name.</param>

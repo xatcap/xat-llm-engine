@@ -1,6 +1,8 @@
+using System.Diagnostics.Metrics;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using XatLlmEngine.Application.Abstractions;
@@ -13,34 +15,37 @@ namespace XatLlmEngine.Infrastructure;
 /// <summary>Registers the Infrastructure layer.</summary>
 public static class DependencyInjection
 {
-    /// <summary>The HTTP client for llama-server. It has no time limits, because local generation can be slow. The supervisor finds a server that hangs.</summary>
+    /// <summary>The HTTP client for llama-server. It has no time limits, because local generation can be slow. The supervisor finds a server that hangs. Both models use it, because it holds no state for one server.</summary>
     internal const string LocalHttpClientName = "provider-local";
 
-    /// <summary>Adds the local model and every cloud provider that has an API key.</summary>
+    /// <summary>Adds the main local model and the small query-expansion model.</summary>
     /// <param name="services">The service collection to add to.</param>
     /// <param name="configuration">The application configuration.</param>
     /// <returns>The same collection, so that the caller can chain calls.</returns>
-    /// <exception cref="InvalidOperationException">The local model settings or a cloud provider's settings are invalid.</exception>
+    /// <exception cref="InvalidOperationException">The settings of a model are invalid.</exception>
     public static IServiceCollection AddInfrastructure(this IServiceCollection services, IConfiguration configuration)
     {
         // The host or a test can choose another clock before this call.
         services.TryAddSingleton(TimeProvider.System);
         AddEngine(services, configuration);
-        var disabled = new List<string>();
-        if (!AddLocalModel(services, configuration))
-        {
-            disabled.Add(LocalChatProvider.ProviderName);
-        }
 
-        foreach (var (name, options) in ProviderSettings.Read(configuration))
+        // Both sections are checked before anything is registered, also when a model is off.
+        var main = ReadModel<LlamaCppOptions>(configuration, LlamaModelRole.Main);
+        var queryExpansion = ReadModel<QueryExpansionOptions>(configuration, LlamaModelRole.QueryExpansion);
+        services.AddSingleton(Options.Create(main));
+        services.AddSingleton(Options.Create(queryExpansion));
+        AddHttpClient(services, LocalHttpClientName);
+
+        var disabled = new List<string>();
+        foreach (var (role, options) in new (LlamaModelRole, LlamaCppOptions)[] { (LlamaModelRole.Main, main), (LlamaModelRole.QueryExpansion, queryExpansion) })
         {
-            if (string.IsNullOrWhiteSpace(options.ApiKey))
+            if (options.Enabled)
             {
-                disabled.Add(name);
+                AddLlamaModel(services, role, options);
             }
             else
             {
-                AddCloudProvider(services, name, options);
+                disabled.Add(role.ProviderName);
             }
         }
 
@@ -103,56 +108,53 @@ public static class DependencyInjection
         }
     }
 
-    /// <summary>Adds the supervised llama-server, unless the settings turn off the local model.</summary>
-    /// <param name="services">The service collection to add to.</param>
+    /// <summary>Reads and checks the settings of one local model.</summary>
+    /// <typeparam name="TOptions">The settings type of the model.</typeparam>
     /// <param name="configuration">The application configuration.</param>
-    /// <returns><see langword="true"/> when the local model is on.</returns>
-    /// <exception cref="InvalidOperationException">The local model settings are invalid. The engine checks them also when the local model is off.</exception>
-    private static bool AddLocalModel(IServiceCollection services, IConfiguration configuration)
+    /// <param name="role">The identity of the model.</param>
+    /// <returns>The valid settings.</returns>
+    /// <exception cref="InvalidOperationException">The settings are invalid. The engine checks them also when the model is off.</exception>
+    private static TOptions ReadModel<TOptions>(IConfiguration configuration, LlamaModelRole role)
+        where TOptions : LlamaCppOptions, new()
     {
         var problems = new List<string>();
-        var options = SettingsRules.Bind<LlamaCppOptions>(configuration.GetSection(LlamaCppOptions.SectionName), problems);
+        var options = SettingsRules.Bind<TOptions>(configuration.GetSection(role.SectionName), problems);
         SettingsRules.Validate(options, problems);
-        SettingsRules.ThrowIfAny($"'{LlamaCppOptions.SectionName}'", problems);
-
-        // One validated object is the only source of these settings.
-        services.AddSingleton(Options.Create(options));
-        if (!options.Enabled)
-        {
-            return false;
-        }
-
-        AddHttpClient(services, LocalHttpClientName);
-        services.AddSingleton(provider => new LocalRequestGate(options.EffectiveParallel, options.MaxQueuedRequests, provider.GetRequiredService<TimeProvider>()));
-        services.AddSingleton<LlamaServerSupervisor>();
-        services.AddHostedService(provider => provider.GetRequiredService<LlamaServerSupervisor>());
-        services.AddSingleton<IChatProvider>(provider => new LocalChatProvider(
-            provider.GetRequiredService<LlamaServerSupervisor>(),
-            provider.GetRequiredService<LocalRequestGate>(),
-            new OpenAiClient(
-                new ProviderTransport(
-                    new TransportSettings(LocalChatProvider.ProviderName, ProviderKind.Local, LocalHttpClientName, RequestTimeout: null, ReadIdleTimeout: null),
-                    provider.GetRequiredService<IHttpClientFactory>(),
-                    provider.GetRequiredService<TimeProvider>(),
-                    provider.GetRequiredService<ILogger<OpenAiClient>>()),
-                options.RequestFields.Contains("stream_options", StringComparer.Ordinal)),
-            provider.GetRequiredService<IOptions<LlamaCppOptions>>()));
-        return true;
+        SettingsRules.ThrowIfAny($"'{role.SectionName}'", problems);
+        return options;
     }
 
-    /// <summary>Adds one cloud provider and its HTTP client.</summary>
+    /// <summary>Adds the request gate, the supervised llama-server and the provider of one local model. Each model has its own set, found by the provider name.</summary>
     /// <param name="services">The service collection to add to.</param>
-    /// <param name="name">The provider's name.</param>
-    /// <param name="options">The provider's validated settings.</param>
-    private static void AddCloudProvider(IServiceCollection services, string name, ProviderOptions options)
+    /// <param name="role">The identity of the model.</param>
+    /// <param name="options">The valid settings of the model.</param>
+    private static void AddLlamaModel(IServiceCollection services, LlamaModelRole role, LlamaCppOptions options)
     {
-        var clientName = $"provider-{name}";
-        var factory = ChatProviderFactories.For(name, options.Type!.Value);
+        var key = role.ProviderName;
+        services.AddKeyedSingleton(key, (provider, _) => new LocalRequestGate(options.EffectiveParallel, options.MaxQueuedRequests, provider.GetRequiredService<TimeProvider>(), role));
+        services.AddKeyedSingleton(key, (provider, _) => new LlamaServerSupervisor(
+            Options.Create(options),
+            provider.GetRequiredService<IHttpClientFactory>(),
+            provider.GetRequiredKeyedService<LocalRequestGate>(key),
+            provider.GetRequiredService<EngineDataFolder>(),
+            provider.GetRequiredService<TimeProvider>(),
+            provider.GetRequiredService<ILogger<LlamaServerSupervisor>>(),
+            provider.GetService<IMeterFactory>(),
+            role));
 
-        // The engine never retries a request. A retry of a generation can cost money twice, so the caller decides. See ADR 0006.
-        // The transport applies the time limits, because they differ for the headers and for the body.
-        AddHttpClient(services, clientName);
-        services.AddSingleton(provider => factory.Create(name, options, clientName, provider));
+        // AddHostedService with a factory skips a second service of the same type, so each model registers its own service by hand.
+        services.AddSingleton<IHostedService>(provider => provider.GetRequiredKeyedService<LlamaServerSupervisor>(key));
+        services.AddSingleton<IChatProvider>(provider => new LocalChatProvider(
+            provider.GetRequiredKeyedService<LlamaServerSupervisor>(key),
+            provider.GetRequiredKeyedService<LocalRequestGate>(key),
+            new OpenAiClient(
+                new ProviderTransport(
+                    new TransportSettings(role.ProviderName, LocalHttpClientName),
+                    provider.GetRequiredService<IHttpClientFactory>(),
+                    provider.GetRequiredService<ILogger<OpenAiClient>>()),
+                options.RequestFields.Contains(OpenAiClient.StreamOptionsField, StringComparer.Ordinal)),
+            Options.Create(options),
+            role));
     }
 
     /// <summary>The providers that the configuration has, but that are turned off.</summary>

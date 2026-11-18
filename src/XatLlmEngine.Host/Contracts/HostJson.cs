@@ -13,6 +13,8 @@ namespace XatLlmEngine.Host.Contracts;
 [JsonSerializable(typeof(ChatCompletionResponse))]
 [JsonSerializable(typeof(ChatCompletionChunkResponse))]
 [JsonSerializable(typeof(ErrorResponse))]
+[JsonSerializable(typeof(QueryExpansionRequest))]
+[JsonSerializable(typeof(QueryExpansionResponse))]
 [JsonSerializable(typeof(ModelListResponse))]
 [JsonSerializable(typeof(HealthResponse))]
 [JsonSerializable(typeof(LivenessResponse))]

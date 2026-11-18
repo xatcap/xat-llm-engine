@@ -6,7 +6,7 @@ namespace XatLlmEngine.Host.Contracts;
 /// <summary>The only place that builds error responses. It maps every error to its HTTP status and the OpenAI error format.</summary>
 internal static class ErrorMapping
 {
-    /// <summary>The seconds a caller should wait before retrying a temporary failure, when the provider asked for no wait.</summary>
+    /// <summary>The seconds a caller should wait before retrying a temporary failure, when the error holds no wait.</summary>
     private const string DefaultRetryAfterSeconds = "5";
 
     /// <summary>The error category of a request the caller must change.</summary>
@@ -22,7 +22,6 @@ internal static class ErrorMapping
     {
         ErrorKind.InvalidRequest => StatusCodes.Status400BadRequest,
         ErrorKind.NotFound => StatusCodes.Status404NotFound,
-        ErrorKind.RateLimited => StatusCodes.Status429TooManyRequests,
         ErrorKind.Unavailable => StatusCodes.Status503ServiceUnavailable,
         ErrorKind.Upstream => StatusCodes.Status502BadGateway,
         ErrorKind.Overloaded => StatusCodes.Status503ServiceUnavailable,
@@ -35,19 +34,18 @@ internal static class ErrorMapping
     {
         ErrorKind.InvalidRequest => InvalidRequestType,
         ErrorKind.NotFound => "not_found_error",
-        ErrorKind.RateLimited => "rate_limit_error",
         ErrorKind.Unavailable => "service_unavailable_error",
         ErrorKind.Upstream => "upstream_error",
         ErrorKind.Overloaded => "overloaded_error",
     }));
 
-    /// <summary>Builds the complete HTTP result for an error, and asks callers to wait before retrying when the failure is temporary. The wait is the provider's own, when the provider sent one. The wait is always at least 1 second, so that callers do not retry immediately.</summary>
+    /// <summary>Builds the complete HTTP result for an error, and asks callers to wait before retrying when the failure is temporary. The wait is the one in the error, when it has one. The wait is always at least 1 second, so that callers do not retry immediately.</summary>
     /// <param name="context">The current request.</param>
     /// <param name="error">The error.</param>
     /// <returns>The result to return from the endpoint.</returns>
     public static IResult ToResult(HttpContext context, EngineError error)
     {
-        if (error.Kind is ErrorKind.Unavailable or ErrorKind.RateLimited or ErrorKind.Overloaded)
+        if (error.Kind is ErrorKind.Unavailable or ErrorKind.Overloaded)
         {
             context.Response.Headers.RetryAfter = error.RetryAfter is { } delay
                 ? Math.Max(1, (long)Math.Ceiling(delay.TotalSeconds)).ToString(CultureInfo.InvariantCulture)

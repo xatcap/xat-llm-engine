@@ -2,6 +2,7 @@ using Microsoft.Extensions.DependencyInjection;
 using XatLlmEngine.Application.Abstractions;
 using XatLlmEngine.Application.Diagnostics;
 using XatLlmEngine.Application.Features.CompleteChat;
+using XatLlmEngine.Application.Features.ExpandQuery;
 using XatLlmEngine.Application.Features.Health;
 using XatLlmEngine.Application.Features.ListModels;
 using XatLlmEngine.Application.Features.Providers;
@@ -20,6 +21,7 @@ public static class DependencyInjection
         services.AddSingleton(provider => new ProviderRegistry(provider.GetServices<IChatProvider>()));
         services.AddSingleton<CompleteChatHandler>();
         services.AddSingleton<StreamChatHandler>();
+        services.AddSingleton<ExpandQueryHandler>();
         services.AddSingleton<ListModelsHandler>();
         services.AddSingleton<GetHealthHandler>();
         return services;

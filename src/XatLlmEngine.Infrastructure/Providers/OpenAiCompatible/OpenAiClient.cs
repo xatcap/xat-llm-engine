@@ -7,7 +7,7 @@ using XatLlmEngine.Domain;
 
 namespace XatLlmEngine.Infrastructure.Providers.OpenAiCompatible;
 
-/// <summary>Speaks the OpenAI chat completions protocol. Cloud services and the local llama-server share this code.</summary>
+/// <summary>Speaks the OpenAI chat completions protocol. Both local models use this code, because llama-server speaks this protocol.</summary>
 /// <param name="transport">Sends the requests and translates transport failures.</param>
 /// <param name="requestStreamUsage">
 /// Whether the server accepts <c>stream_options</c>. Then the client always asks for token counts in a stream, for the metrics
@@ -15,8 +15,30 @@ namespace XatLlmEngine.Infrastructure.Providers.OpenAiCompatible;
 /// </param>
 internal sealed class OpenAiClient(ProviderTransport transport, bool requestStreamUsage = false)
 {
+    /// <summary>The request fields that set the output token limit in the OpenAI protocol, in order of preference.</summary>
+    internal static readonly string[] TokenLimitFields = ["max_tokens", "max_completion_tokens"];
+
+    /// <summary>The field of the OpenAI protocol that asks for token counts in a stream.</summary>
+    internal const string StreamOptionsField = "stream_options";
+
     /// <summary>The value a server sends as the last stream event.</summary>
     private const string StreamEnd = "[DONE]";
+
+    /// <summary>Tells whether the stream sends the final token counts to the caller for this request body.</summary>
+    /// <remarks>
+    /// The OpenAI protocol sends token counts only when the caller asks for them.
+    /// When the template lists <c>stream_options</c>, the client always asks for the counts for the metrics and logs.
+    /// The caller receives the counts only when the caller asked for them.
+    /// A provider with no <c>stream_options</c> in its template sends the counts by itself, and the caller then gets them.
+    /// </remarks>
+    /// <param name="body">The caller's request body, before the provider modifies it.</param>
+    /// <returns><see langword="true"/> when the caller receives the final usage piece.</returns>
+    public bool ShouldForwardStreamUsage(JsonObject body) =>
+        !requestStreamUsage
+        || (body[StreamOptionsField] is JsonObject streamOptions
+            && streamOptions["include_usage"] is JsonValue value
+            && value.TryGetValue<bool>(out var includeUsage)
+            && includeUsage);
 
     /// <summary>Generates a complete answer.</summary>
     /// <param name="baseUrl">The server's base address, including any version path.</param>
@@ -29,7 +51,7 @@ internal sealed class OpenAiClient(ProviderTransport transport, bool requestStre
             Operation(baseUrl),
             headers => Authenticate(headers, apiKey),
             ToWire(request, stream: false),
-            ProviderJson.Default.OpenAiChatResponse,
+            OpenAiJson.Default.OpenAiChatResponse,
             ToCompletion,
             cancellationToken);
 
@@ -44,9 +66,9 @@ internal sealed class OpenAiClient(ProviderTransport transport, bool requestStre
         var body = ToWire(request, stream: true);
         if (requestStreamUsage)
         {
-            var streamOptions = body["stream_options"] as JsonObject ?? [];
+            var streamOptions = body[StreamOptionsField] as JsonObject ?? [];
             streamOptions["include_usage"] = true;
-            body["stream_options"] = streamOptions;
+            body[StreamOptionsField] = streamOptions;
         }
 
         return transport.StreamAsync(Operation(baseUrl), headers => Authenticate(headers, apiKey), body, ReadChunksAsync, cancellationToken);
@@ -141,7 +163,7 @@ internal sealed class OpenAiClient(ProviderTransport transport, bool requestStre
         OpenAiChatResponse? body;
         try
         {
-            body = JsonSerializer.Deserialize(data, ProviderJson.Default.OpenAiChatResponse);
+            body = JsonSerializer.Deserialize(data, OpenAiJson.Default.OpenAiChatResponse);
         }
         catch (JsonException exception)
         {
